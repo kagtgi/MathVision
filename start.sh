@@ -1,12 +1,12 @@
 #!/bin/bash
-# MathTeacherVision - Quick Start Script
+# MathVision - Quick Start Script
 # Just run this script and the app will open in your browser!
 
 set -e
 
 echo ""
 echo "============================================"
-echo "   MathTeacherVision - Starting Up..."
+echo "   MathVision - Starting Up..."
 echo "============================================"
 echo ""
 
@@ -37,7 +37,7 @@ fi
 
 echo ""
 echo "============================================"
-echo "   Starting MathTeacherVision..."
+echo "   Starting MathVision..."
 echo "============================================"
 echo ""
 echo "The app will open at: http://localhost:3000"
@@ -50,6 +50,13 @@ echo "  3. Click 'Convert to LaTeX'"
 echo ""
 echo "Press Ctrl+C to stop the server."
 echo ""
+
+# Open the browser (works on macOS and Linux)
+if command -v xdg-open &> /dev/null; then
+    xdg-open http://localhost:3000 &
+elif command -v open &> /dev/null; then
+    open http://localhost:3000 &
+fi
 
 # Start the dev server
 npm run dev

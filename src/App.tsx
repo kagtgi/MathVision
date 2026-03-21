@@ -133,8 +133,6 @@ Transcribe all mathematical content into clean LaTeX suitable for MathType, Over
 
 Output format:
 \`\`\`latex
-% Paste directly into MathType or any LaTeX editor
-
 $x^2 + y^2 = r^2$
 $\\left( x - a \\right)^2 + \\left( y - b \\right)^2 = r^2$
 $\\alpha = 90{}^\\circ$
@@ -143,20 +141,11 @@ $\{y\}' = 2x$
 
 ---
 
-## STEP 3 — Brief annotation
-After all code blocks, add a short plain-text note (3–5 lines max):
-- What content types you detected
-- Any part that was unclear or ambiguous and how you handled it
-- Any assumption made (e.g. "assumed right angle at C from context")
-- Anything the teacher should manually verify
-
----
-
 ## Format rules
-- Code first, annotation after — no prose before the code blocks
-- If both TYPE A and TYPE B are present, output Step 2A block first, then Step 2B block, then the annotation
+- Output ONLY the code block(s) — no prose, no preamble, no annotation, no explanation before or after
+- If both TYPE A and TYPE B are present, output Step 2A block first, then Step 2B block — nothing else
 - Never explain what TikZ or LaTeX is
-- If the image is blank, unreadable, or contains no math, say so in one sentence
+- If the image is blank, unreadable, or contains no math, say so in one sentence only
 - If the image contains Vietnamese text labels (e.g. "Bài 1:", "đường thẳng AB"), include them as \\node labels or comments using UTF-8 encoding
 `;
 
@@ -546,44 +535,6 @@ function ResultRenderer({ content }: { content: string }) {
   );
 }
 
-function TikzRenderer({ code }: { code: string }) {
-  const [height, setHeight] = useState(350);
-  const iframeRef = useRef<HTMLIFrameElement>(null);
-  const idRef = useRef(Math.random().toString(36).slice(2));
-
-  useEffect(() => {
-    const handler = (e: MessageEvent) => {
-      if (e.data?.tikzId === idRef.current && typeof e.data.height === 'number') {
-        setHeight(Math.max(e.data.height, 200));
-      }
-    };
-    window.addEventListener('message', handler);
-    return () => window.removeEventListener('message', handler);
-  }, []);
-
-  const escapedCode = code.replace(/<\/script/gi, '<\\/script');
-  const tikzId = idRef.current;
-
-  const srcDoc = `<!DOCTYPE html><html><head>
-<link rel="stylesheet" type="text/css" href="https://tikzjax.com/v1/fonts.css">
-<script src="https://tikzjax.com/v1/tikzjax.js"><\/script>
-<style>html,body{margin:0;padding:16px;background:white;display:flex;justify-content:center;align-items:start;overflow:hidden;}</style>
-</head><body>
-<script type="text/tikz">${escapedCode}<\/script>
-<script>new MutationObserver(function(m,o){if(document.querySelector('svg')){o.disconnect();setTimeout(function(){window.parent.postMessage({tikzId:'${tikzId}',height:document.documentElement.scrollHeight},'*')},300)}}).observe(document.body,{childList:true,subtree:true});<\/script>
-</body></html>`;
-
-  return (
-    <div className="flex justify-center bg-white p-4 rounded-lg overflow-hidden min-h-[200px] border border-[#00186E]/10">
-      <iframe
-        ref={iframeRef}
-        srcDoc={srcDoc}
-        style={{ border: 'none', width: '100%', height: `${height}px`, background: 'white' }}
-        title="TikZ Preview"
-      />
-    </div>
-  );
-}
 
 function FormulaPreview({ code }: { code: string }) {
   return (
@@ -639,61 +590,44 @@ function CopyCodeButton({ code }: { code: string }) {
   );
 }
 
-function CopyImageButton({ iframeRef }: { iframeRef: React.RefObject<HTMLIFrameElement | null> }) {
+function DownloadImageButton({ imageDataUrl }: { imageDataUrl: string }) {
+  const handleDownload = () => {
+    const a = document.createElement('a');
+    a.href = imageDataUrl;
+    a.download = 'tikz-figure.png';
+    a.click();
+  };
+
+  return (
+    <button
+      onClick={handleDownload}
+      aria-label="Download image as PNG"
+      className="flex items-center gap-1.5 text-xs font-medium text-[#00186E]/50 hover:text-[#00186E] transition-colors font-sans-brand"
+    >
+      <ImageDown className="w-3.5 h-3.5" />
+      <span>Download</span>
+    </button>
+  );
+}
+
+function CopyImageButton({ imageDataUrl }: { imageDataUrl: string }) {
   const [copied, setCopied] = useState(false);
 
   const handleCopyImage = async () => {
     try {
-      const iframe = iframeRef.current;
-      if (!iframe) return;
-      const svgEl = iframe.contentDocument?.querySelector('svg');
-      if (!svgEl) return;
-
-      const svgClone = svgEl.cloneNode(true) as SVGElement;
-      // Ensure the SVG has proper dimensions
-      if (!svgClone.getAttribute('xmlns')) {
-        svgClone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
-      }
-      const svgData = new XMLSerializer().serializeToString(svgClone);
-      const svgBlob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
-      const url = URL.createObjectURL(svgBlob);
-
-      const img = new Image();
-      img.onload = async () => {
-        const canvas = document.createElement('canvas');
-        const scale = 2; // Higher resolution
-        canvas.width = img.width * scale;
-        canvas.height = img.height * scale;
-        const ctx = canvas.getContext('2d')!;
-        ctx.fillStyle = 'white';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        ctx.scale(scale, scale);
-        ctx.drawImage(img, 0, 0);
-        URL.revokeObjectURL(url);
-
-        canvas.toBlob(async (blob) => {
-          if (!blob) return;
-          try {
-            await navigator.clipboard.write([
-              new ClipboardItem({ 'image/png': blob })
-            ]);
-            setCopied(true);
-            setTimeout(() => setCopied(false), 2000);
-          } catch {
-            // Fallback: download the image
-            const a = document.createElement('a');
-            a.href = URL.createObjectURL(blob);
-            a.download = 'tikz-figure.png';
-            a.click();
-            URL.revokeObjectURL(a.href);
-            setCopied(true);
-            setTimeout(() => setCopied(false), 2000);
-          }
-        }, 'image/png');
-      };
-      img.src = url;
+      const res = await fetch(imageDataUrl);
+      const blob = await res.blob();
+      await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
     } catch {
-      // silently fail
+      // Fallback: download
+      const a = document.createElement('a');
+      a.href = imageDataUrl;
+      a.download = 'tikz-figure.png';
+      a.click();
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
     }
   };
 
@@ -710,7 +644,7 @@ function CopyImageButton({ iframeRef }: { iframeRef: React.RefObject<HTMLIFrameE
         </>
       ) : (
         <>
-          <ImageDown className="w-3.5 h-3.5" />
+          <Copy className="w-3.5 h-3.5" />
           <span>Copy Image</span>
         </>
       )}
@@ -759,7 +693,7 @@ function CodeBlockPanel({ label, code }: { label: string, code: string }) {
 }
 
 function CodeBlock({ language, code }: { language: string, code: string }) {
-  const iframeRef = useRef<HTMLIFrameElement>(null);
+  const [tikzImageUrl, setTikzImageUrl] = useState<string | null>(null);
   const isTikz = code.includes('\\begin{tikzpicture}');
 
   if (isTikz) {
@@ -769,9 +703,16 @@ function CodeBlock({ language, code }: { language: string, code: string }) {
         <PreviewBlock
           title="TikZ Preview"
           icon={<Eye className="w-3.5 h-3.5 mr-1" />}
-          actions={<CopyImageButton iframeRef={iframeRef} />}
+          actions={
+            tikzImageUrl ? (
+              <div className="flex items-center gap-3">
+                <DownloadImageButton imageDataUrl={tikzImageUrl} />
+                <CopyImageButton imageDataUrl={tikzImageUrl} />
+              </div>
+            ) : undefined
+          }
         >
-          <TikzRendererWithRef code={code} iframeRef={iframeRef} />
+          <TikzRendererWithRef code={code} onImageReady={setTikzImageUrl} />
         </PreviewBlock>
 
         {/* TikZ Code Block */}
@@ -796,23 +737,55 @@ function CodeBlock({ language, code }: { language: string, code: string }) {
   );
 }
 
-function TikzRendererWithRef({ code, iframeRef }: { code: string, iframeRef: React.RefObject<HTMLIFrameElement | null> }) {
-  const [height, setHeight] = useState(350);
+function TikzRendererWithRef({ code, onImageReady }: { code: string, onImageReady?: (dataUrl: string | null) => void }) {
+  const [pngDataUrl, setPngDataUrl] = useState<string | null>(null);
+  const [isRendering, setIsRendering] = useState(true);
+  const iframeRef = useRef<HTMLIFrameElement>(null);
   const idRef = useRef(Math.random().toString(36).slice(2));
 
   useEffect(() => {
     const handler = (e: MessageEvent) => {
-      if (e.data?.tikzId === idRef.current && typeof e.data.height === 'number') {
-        setHeight(Math.max(e.data.height, 200));
-      }
+      if (e.data?.tikzId !== idRef.current) return;
+      const iframe = iframeRef.current;
+      if (!iframe) return;
+
+      setTimeout(() => {
+        const svgEl = iframe.contentDocument?.querySelector('svg');
+        if (!svgEl) { setIsRendering(false); onImageReady?.(null); return; }
+
+        const svgClone = svgEl.cloneNode(true) as SVGElement;
+        if (!svgClone.getAttribute('xmlns')) svgClone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+        const svgData = new XMLSerializer().serializeToString(svgClone);
+        const svgBlob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
+        const url = URL.createObjectURL(svgBlob);
+
+        const img = new Image();
+        img.onload = () => {
+          const scale = 2;
+          const canvas = document.createElement('canvas');
+          canvas.width = img.width * scale;
+          canvas.height = img.height * scale;
+          const ctx = canvas.getContext('2d')!;
+          ctx.fillStyle = 'white';
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          ctx.scale(scale, scale);
+          ctx.drawImage(img, 0, 0);
+          URL.revokeObjectURL(url);
+          const dataUrl = canvas.toDataURL('image/png');
+          setPngDataUrl(dataUrl);
+          setIsRendering(false);
+          onImageReady?.(dataUrl);
+        };
+        img.onerror = () => { URL.revokeObjectURL(url); setIsRendering(false); onImageReady?.(null); };
+        img.src = url;
+      }, 500);
     };
     window.addEventListener('message', handler);
     return () => window.removeEventListener('message', handler);
-  }, []);
+  }, [onImageReady]);
 
-  const escapedCode = code.replace(/<\/script/gi, '<\\/script');
   const tikzId = idRef.current;
-
+  const escapedCode = code.replace(/<\/script/gi, '<\\/script');
   const srcDoc = `<!DOCTYPE html><html><head>
 <link rel="stylesheet" type="text/css" href="https://tikzjax.com/v1/fonts.css">
 <script src="https://tikzjax.com/v1/tikzjax.js"><\/script>
@@ -824,12 +797,25 @@ function TikzRendererWithRef({ code, iframeRef }: { code: string, iframeRef: Rea
 
   return (
     <div className="flex justify-center bg-white rounded-lg overflow-hidden min-h-[200px]">
+      {/* Hidden iframe for tikzjax rendering */}
       <iframe
         ref={iframeRef}
         srcDoc={srcDoc}
-        style={{ border: 'none', width: '100%', height: `${height}px`, background: 'white' }}
-        title="TikZ Preview"
+        style={{ display: 'none' }}
+        title="TikZ Renderer"
       />
+      {isRendering ? (
+        <div className="flex items-center justify-center w-full h-48 text-[#00186E]/40">
+          <Loader2 className="w-6 h-6 animate-spin mr-2 text-[#FFAD1D]" />
+          <span className="text-sm font-sans-brand">Rendering figure...</span>
+        </div>
+      ) : pngDataUrl ? (
+        <img src={pngDataUrl} alt="TikZ figure" className="max-w-full h-auto" />
+      ) : (
+        <div className="flex items-center justify-center w-full h-48 text-red-400">
+          <span className="text-sm font-sans-brand">Failed to render figure</span>
+        </div>
+      )}
     </div>
   );
 }

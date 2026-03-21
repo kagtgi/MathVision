@@ -225,7 +225,7 @@ export default function App() {
       const mimeType = mimeTypeMatch ? mimeTypeMatch[1] : 'image/jpeg';
 
       const response = await ai.models.generateContent({
-        model: 'gemini-2.5-pro-latest',
+        model: 'gemini-pro-latest',
         contents: [
           {
             role: 'user',

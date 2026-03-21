@@ -194,12 +194,12 @@ The model is configured in `src/App.tsx`. To use a different Gemini model, chang
 
 ```typescript
 const response = await ai.models.generateContent({
-  model: 'gemini-2.5-pro-latest',  // Change this to any supported model
+  model: 'gemini-pro-latest',  // Change this to any supported model
   // ...
 });
 ```
 
-Available models: `gemini-2.5-pro-latest`, `gemini-2.5-flash-latest`, `gemini-2.0-flash`, etc.
+Available models: `gemini-pro-latest`, `gemini-2.5-flash-latest`, `gemini-2.0-flash`, etc.
 See the [Gemini model documentation](https://ai.google.dev/gemini-api/docs/models) for all options.
 
 ---

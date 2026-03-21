@@ -1,8 +1,20 @@
 import katex from 'katex';
 
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+const RETINA_SCALE = 2;
+const EQUATION_FONT_SIZE_PX = 18;
+const EQUATION_PADDING_PX = 8;
+const EQUATION_PADDING_SIDE_PX = 12;
+const CSS_SETTLE_DELAY_MS = 50;
+const TIKZ_RENDER_TIMEOUT_MS = 30000;
+const MIN_TIKZ_DIMENSION = 100;
+
+const KATEX_CSS_URL = 'https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css';
+
 /**
  * Render a LaTeX equation string to a PNG image (as Uint8Array + dimensions).
- * Uses KaTeX to produce HTML, wraps it in an SVG foreignObject, and draws to a canvas.
+ * Uses KaTeX to produce a DOM node, measures it, then draws to canvas via SVG foreignObject.
  *
  * @param latex  LaTeX string WITHOUT $ delimiters
  * @param displayMode  true for display equations, false for inline
@@ -12,44 +24,45 @@ export async function latexToImage(
   latex: string,
   displayMode = true,
 ): Promise<{ bytes: Uint8Array; width: number; height: number }> {
-  // Render LaTeX to HTML string with KaTeX
-  const html = katex.renderToString(latex, {
+  // Create an off-screen container and render LaTeX via KaTeX DOM API (safe — no innerHTML)
+  const container = document.createElement('div');
+  container.style.position = 'absolute';
+  container.style.visibility = 'hidden';
+  container.style.left = '-9999px';
+  container.style.top = '-9999px';
+  container.style.fontSize = `${EQUATION_FONT_SIZE_PX}px`;
+  container.style.lineHeight = '1.4';
+  container.style.padding = `${EQUATION_PADDING_PX}px ${EQUATION_PADDING_SIDE_PX}px`;
+
+  // Use KaTeX's DOM rendering (renderMathInElement is unsafe, but renderToString is fine
+  // since KaTeX output is deterministic and trusted). We use the DOM overload for safety.
+  katex.render(latex, container, {
     displayMode,
     throwOnError: false,
     output: 'html',
     strict: false,
   });
 
-  // Create an off-screen container to measure the rendered size
-  const container = document.createElement('div');
-  container.style.position = 'absolute';
-  container.style.visibility = 'hidden';
-  container.style.left = '-9999px';
-  container.style.top = '-9999px';
-  container.style.fontSize = '18px';
-  container.style.lineHeight = '1.4';
-  container.style.padding = '8px 12px';
-  container.innerHTML = html;
   document.body.appendChild(container);
 
-  // Load KaTeX CSS into our measurement (it should already be in the page)
-  await new Promise((r) => setTimeout(r, 50)); // allow CSS to apply
+  // Allow CSS to settle for accurate measurement
+  await new Promise((r) => setTimeout(r, CSS_SETTLE_DELAY_MS));
 
   const rect = container.getBoundingClientRect();
-  const scale = 2; // 2x for retina-quality rendering
-  const width = Math.ceil(rect.width * scale);
-  const height = Math.ceil(rect.height * scale);
+  const width = Math.ceil(rect.width * RETINA_SCALE);
+  const height = Math.ceil(rect.height * RETINA_SCALE);
 
+  // Get the rendered HTML from the container (now it's KaTeX-generated, trusted)
+  const html = container.innerHTML;
   document.body.removeChild(container);
 
   // Build an SVG with foreignObject containing the KaTeX HTML
-  const katexCssUrl = 'https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css';
   const svgContent = `
     <svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">
       <foreignObject width="100%" height="100%">
         <div xmlns="http://www.w3.org/1999/xhtml"
-             style="font-size:${18 * scale}px; line-height:1.4; padding:${8 * scale}px ${12 * scale}px; color:#000;">
-          <link rel="stylesheet" href="${katexCssUrl}" />
+             style="font-size:${EQUATION_FONT_SIZE_PX * RETINA_SCALE}px; line-height:1.4; padding:${EQUATION_PADDING_PX * RETINA_SCALE}px ${EQUATION_PADDING_SIDE_PX * RETINA_SCALE}px; color:#000;">
+          <link rel="stylesheet" href="${KATEX_CSS_URL}" />
           ${html}
         </div>
       </foreignObject>
@@ -119,8 +132,7 @@ export async function tikzToImage(
     container.appendChild(script);
 
     // Wait for TikZJax to render (it converts script elements to SVG)
-    // TikZJax fires a 'tikzjax-load-finished' event or we can poll for an SVG child
-    const svg = await waitForTikzSvg(container, 15000);
+    const svg = await waitForTikzSvg(container, TIKZ_RENDER_TIMEOUT_MS);
 
     if (!svg) {
       document.body.removeChild(container);
@@ -133,9 +145,8 @@ export async function tikzToImage(
     const svgUrl = URL.createObjectURL(svgBlob);
 
     const svgRect = svg.getBoundingClientRect();
-    const scale = 2;
-    const width = Math.max(Math.ceil(svgRect.width * scale), 100);
-    const height = Math.max(Math.ceil(svgRect.height * scale), 100);
+    const width = Math.max(Math.ceil(svgRect.width * RETINA_SCALE), MIN_TIKZ_DIMENSION);
+    const height = Math.max(Math.ceil(svgRect.height * RETINA_SCALE), MIN_TIKZ_DIMENSION);
 
     const img = new Image();
     const result = await new Promise<{ bytes: Uint8Array; width: number; height: number } | null>(

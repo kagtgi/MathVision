@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, memo } from 'react';
 import { GoogleGenAI } from '@google/genai';
 import * as pdfjsLib from 'pdfjs-dist';
 import {
@@ -38,6 +38,17 @@ import rehypeKatex from 'rehype-katex';
 import remarkGfm from 'remark-gfm';
 import { latexToMathChildren, parseTextWithMath } from './utils/latexToDocxMath';
 import { latexToImage, tikzToImage } from './utils/latexToImage';
+
+// ─── Constants ──────────────────────────────────────────────────────────────
+
+const MAX_PDF_SIZE_BYTES = 50 * 1024 * 1024; // 50 MB
+const MAX_PDF_SIZE_MB = 50;
+const PDF_RENDER_SCALE = 2;
+const JPEG_QUALITY = 0.85;
+const DOCX_MAX_IMAGE_WIDTH = 500; // points (~6.9 inches)
+const GEMINI_MODEL = 'gemini-2.0-flash';
+const GEMINI_TEMPERATURE = 0.1;
+const API_TIMEOUT_MS = 60_000; // 60 seconds per page
 
 // ─── PDF.js Worker Setup ─────────────────────────────────────────────────────
 
@@ -147,7 +158,8 @@ async function renderPdfPage(pdf: pdfjsLib.PDFDocumentProxy, pageNum: number, sc
   canvas.width = viewport.width;
   canvas.height = viewport.height;
   const ctx = canvas.getContext('2d')!;
-  await page.render({ canvasContext: ctx, canvas, viewport } as any).promise;
+  // PDF.js types require canvas alongside canvasContext
+  await page.render({ canvasContext: ctx, canvas, viewport } as Parameters<typeof page.render>[0]).promise;
   return canvas;
 }
 
@@ -234,7 +246,7 @@ function buildDocx(pages: PageContent[], fileName: string): DocxDocument {
           // Prefer rendered equation image for highest quality
           if (el.equationImage) {
             const { bytes, width, height } = el.equationImage;
-            const maxWidth = 500;
+            const maxWidth = DOCX_MAX_IMAGE_WIDTH;
             const scale = width > maxWidth ? maxWidth / width : 1;
             children.push(
               new Paragraph({
@@ -323,7 +335,7 @@ function buildDocx(pages: PageContent[], fileName: string): DocxDocument {
 
           if (imgSource) {
             const { bytes, width, height } = imgSource;
-            const maxWidth = 500;
+            const maxWidth = DOCX_MAX_IMAGE_WIDTH;
             const scale = width > maxWidth ? maxWidth / width : 1;
             const imgWidth = Math.round(width * scale);
             const imgHeight = Math.round(height * scale);
@@ -406,7 +418,7 @@ function InlineMathText({ text }: { text: string }) {
   );
 }
 
-function DocxPageElement({ element }: { element: DocumentElement }) {
+const DocxPageElement = memo(function DocxPageElement({ element }: { element: DocumentElement }) {
   switch (element.type) {
     case 'heading': {
       const styles: Record<number, string> = {
@@ -526,7 +538,7 @@ function DocxPageElement({ element }: { element: DocumentElement }) {
     default:
       return null;
   }
-}
+});
 
 // ─── Claude-style Document Viewer ───────────────────────────────────────────
 
@@ -705,12 +717,13 @@ export default function PdfToDocxConverter({ apiKey }: { apiKey: string }) {
   const [isGeneratingDocx, setIsGeneratingDocx] = useState(false);
   const [showViewer, setShowViewer] = useState(false);
   const pageCanvasesRef = useRef<Map<number, HTMLCanvasElement>>(new Map());
+  const abortRef = useRef<AbortController | null>(null);
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
     const file = acceptedFiles[0];
     if (!file) return;
-    if (file.size > 50 * 1024 * 1024) {
-      setError('File is too large. Maximum size is 50MB.');
+    if (file.size > MAX_PDF_SIZE_BYTES) {
+      setError(`File is too large. Maximum size is ${MAX_PDF_SIZE_MB}MB.`);
       return;
     }
     setPdfFile(file);
@@ -722,11 +735,16 @@ export default function PdfToDocxConverter({ apiKey }: { apiKey: string }) {
     onDrop,
     accept: { 'application/pdf': ['.pdf'] },
     maxFiles: 1,
-    maxSize: 50 * 1024 * 1024,
+    maxSize: MAX_PDF_SIZE_BYTES,
   });
 
   const processPdf = async () => {
     if (!pdfFile || !apiKey) return;
+
+    // Cancel any in-flight processing
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
 
     setIsProcessing(true);
     setError(null);
@@ -747,23 +765,33 @@ export default function PdfToDocxConverter({ apiKey }: { apiKey: string }) {
       const allPages: PageContent[] = [];
 
       for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
+        // Check if user cancelled
+        if (controller.signal.aborted) return;
+
         setProgress({
           current: pageNum,
           total: totalPages,
-          status: `Processing page ${pageNum} of ${totalPages}...`,
+          status: `Rendering page ${pageNum} of ${totalPages}...`,
         });
 
         // Render page to canvas
-        const canvas = await renderPdfPage(pdf, pageNum, 2);
+        const canvas = await renderPdfPage(pdf, pageNum, PDF_RENDER_SCALE);
         pageCanvasesRef.current.set(pageNum, canvas);
 
+        if (controller.signal.aborted) return;
+
         // Convert to base64 for Gemini
-        const imageDataUrl = canvasToBase64(canvas, 0.85);
+        setProgress({
+          current: pageNum,
+          total: totalPages,
+          status: `Analyzing page ${pageNum} of ${totalPages}...`,
+        });
+        const imageDataUrl = canvasToBase64(canvas, JPEG_QUALITY);
         const base64Data = imageDataUrl.split(',')[1];
 
-        // Send to Gemini for analysis
-        const response = await ai.models.generateContent({
-          model: 'gemini-2.0-flash',
+        // Send to Gemini for analysis with timeout
+        const apiCall = ai.models.generateContent({
+          model: GEMINI_MODEL,
           contents: [
             {
               role: 'user',
@@ -779,15 +807,31 @@ export default function PdfToDocxConverter({ apiKey }: { apiKey: string }) {
             },
           ],
           config: {
-            temperature: 0.1,
+            temperature: GEMINI_TEMPERATURE,
           },
         });
+
+        const timeoutPromise = new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error(`API timeout: page ${pageNum} took too long`)), API_TIMEOUT_MS),
+        );
+
+        const response = await Promise.race([apiCall, timeoutPromise]);
+
+        if (controller.signal.aborted) return;
 
         const responseText = response.text || '';
         const elements = parseGeminiResponse(responseText);
 
         // Process elements: extract images, render equations, compile TikZ
+        setProgress({
+          current: pageNum,
+          total: totalPages,
+          status: `Processing elements on page ${pageNum}...`,
+        });
+
         for (const el of elements) {
+          if (controller.signal.aborted) return;
+
           if (el.type === 'image' && el.bbox && el.bbox.length === 4) {
             const { dataUrl } = cropImageFromCanvas(canvas, el.bbox);
             el.imageData = dataUrl;
@@ -823,10 +867,14 @@ export default function PdfToDocxConverter({ apiKey }: { apiKey: string }) {
         });
       }
 
+      if (controller.signal.aborted) return;
+
       setDocumentContent(allPages);
       setShowViewer(true);
       setProgress({ current: totalPages, total: totalPages, status: 'Done!' });
     } catch (err: unknown) {
+      if (controller.signal.aborted) return; // user cancelled, no error
+
       console.error('Error processing PDF:', err);
       const message = err instanceof Error ? err.message : String(err);
       const lower = message.toLowerCase();
@@ -837,6 +885,8 @@ export default function PdfToDocxConverter({ apiKey }: { apiKey: string }) {
         setError('API rate limit reached. Please wait a moment and try again.');
       } else if (lower.includes('password') || lower.includes('encrypted')) {
         setError('This PDF is password-protected. Please provide an unprotected PDF.');
+      } else if (lower.includes('timeout')) {
+        setError('Request timed out. The page may be too complex. Please try again.');
       } else if (lower.includes('network') || lower.includes('fetch') || lower.includes('failed to fetch')) {
         setError('Network error. Please check your internet connection.');
       } else {
@@ -844,6 +894,7 @@ export default function PdfToDocxConverter({ apiKey }: { apiKey: string }) {
       }
     } finally {
       setIsProcessing(false);
+      abortRef.current = null;
     }
   };
 
@@ -874,10 +925,13 @@ export default function PdfToDocxConverter({ apiKey }: { apiKey: string }) {
   };
 
   const reset = () => {
+    abortRef.current?.abort();
+    abortRef.current = null;
     setPdfFile(null);
     setDocumentContent(null);
     setError(null);
     setShowViewer(false);
+    setIsProcessing(false);
     setProgress({ current: 0, total: 0, status: '' });
     pageCanvasesRef.current.clear();
   };

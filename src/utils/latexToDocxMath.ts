@@ -495,15 +495,15 @@ export function latexToMathChildren(latex: string): MathComponent[] {
  */
 export function parseTextWithMath(text: string): (TextRun | OfficeMath)[] {
   const parts: (TextRun | OfficeMath)[] = [];
-  // Match $...$ (non-greedy, no nested $)
-  const regex = /\$([^$]+?)\$/g;
+  // Match $...$ but skip escaped \$ — uses negative lookbehind
+  const regex = /(?<!\\)\$([^$]+?)(?<!\\)\$/g;
   let lastIndex = 0;
   let match: RegExpExecArray | null;
 
   while ((match = regex.exec(text)) !== null) {
-    // Text before math
+    // Text before math (restore escaped \$ to literal $)
     if (match.index > lastIndex) {
-      parts.push(new TextRun({ text: text.slice(lastIndex, match.index) }));
+      parts.push(new TextRun({ text: text.slice(lastIndex, match.index).replace(/\\\$/g, '$') }));
     }
     // Math
     const latex = match[1];
@@ -516,14 +516,14 @@ export function parseTextWithMath(text: string): (TextRun | OfficeMath)[] {
     lastIndex = regex.lastIndex;
   }
 
-  // Remaining text
+  // Remaining text (restore escaped \$ to literal $)
   if (lastIndex < text.length) {
-    parts.push(new TextRun({ text: text.slice(lastIndex) }));
+    parts.push(new TextRun({ text: text.slice(lastIndex).replace(/\\\$/g, '$') }));
   }
 
   // If nothing was parsed, return original text
   if (parts.length === 0) {
-    parts.push(new TextRun({ text }));
+    parts.push(new TextRun({ text: text.replace(/\\\$/g, '$') }));
   }
 
   return parts;

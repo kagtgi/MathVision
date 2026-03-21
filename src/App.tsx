@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { GoogleGenAI } from '@google/genai';
-import { Upload, Image as ImageIcon, Loader2, Copy, CheckCircle2, AlertCircle, Key } from 'lucide-react';
+import { Upload, Image as ImageIcon, Loader2, Copy, CheckCircle2, AlertCircle, Key, ImageDown, Eye, Code } from 'lucide-react';
 import { useDropzone } from 'react-dropzone';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -95,9 +95,9 @@ Transcribe all mathematical content into clean LaTeX suitable for MathType, Over
 - Wrap ALL math content in $...$ — there is no other math environment
 - One $...$ per line for multi-line derivations:
 
-  $f(x) = x^2 + 2x + 1$
-  $f(x) = (x+1)^2$
-  $f'(x) = 2(x+1)$
+  $f\\left( x \\right) = x^2 + 2x + 1$
+  $f\\left( x \\right) = \\left( x+1 \\right)^2$
+  $\{f\}'\\left( x \\right) = 2\\left( x+1 \\right)$
 
 - For piecewise / systems, use $...$ containing a cases environment:
 
@@ -113,7 +113,17 @@ Transcribe all mathematical content into clean LaTeX suitable for MathType, Over
 ### Transcription rules
 - Reproduce exactly what is shown — do NOT simplify, factor, or solve
 - Preserve ALL exponents, subscripts, superscripts exactly as written
-- Preserve ALL parentheses, brackets, and braces; use \\left( \\right) for dynamic sizing around tall content (fractions, integrals, matrices)
+- ALWAYS use \\left and \\right for ALL brackets, parentheses, and braces — no exceptions:
+  - Parentheses: $\\left( ... \\right)$ — never use bare ( )
+  - Square brackets: $\\left[ ... \\right]$ — never use bare [ ]
+  - Curly braces: $\\left\\{ ... \\right\\}$ — never use bare \\{ \\}
+  - Examples: $\\left( x + 1 \\right)$, $\\left[ a, b \\right]$, $\\left\\{ 1, 2, 3 \\right\\}$
+- For derivatives with prime notation, always wrap the base in braces before the prime:
+  - Correct: $\{y\}'$, $\{f\}'(x)$, $\{y\}''$, $\{f\}''(x)$
+  - Wrong: $y'$, $f'(x)$, $y''$
+- For degree symbols, always use {}^\\circ with braces before it:
+  - Correct: $30{}^\\circ$, $\\widehat{BAC} = 30{}^\\circ$
+  - Wrong: $30°$, $30^\\circ$, $30^{\\circ}$
 - Standard commands: \\frac{a}{b}, \\int_{a}^{b} f(x)\\,dx, \\sum_{i=1}^{n}, \\lim_{x \\to \\infty}, \\sqrt{...}, \\sqrt[n]{...}, \\vec{v}, \\mathbf{v}, \\alpha \\beta \\theta \\pi \\Delta \\Sigma (etc.)
 - For piecewise functions or systems of equations use cases:
     \\begin{cases}
@@ -126,6 +136,9 @@ Output format:
 % Paste directly into MathType or any LaTeX editor
 
 $x^2 + y^2 = r^2$
+$\\left( x - a \\right)^2 + \\left( y - b \\right)^2 = r^2$
+$\\alpha = 90{}^\\circ$
+$\{y\}' = 2x$
 \`\`\`
 
 ---
@@ -535,6 +548,7 @@ function ResultRenderer({ content }: { content: string }) {
 
 function TikzRenderer({ code }: { code: string }) {
   const [height, setHeight] = useState(350);
+  const iframeRef = useRef<HTMLIFrameElement>(null);
   const idRef = useRef(Math.random().toString(36).slice(2));
 
   useEffect(() => {
@@ -562,6 +576,7 @@ function TikzRenderer({ code }: { code: string }) {
   return (
     <div className="flex justify-center bg-white p-4 rounded-lg overflow-hidden min-h-[200px] border border-[#00186E]/10">
       <iframe
+        ref={iframeRef}
         srcDoc={srcDoc}
         style={{ border: 'none', width: '100%', height: `${height}px`, background: 'white' }}
         title="TikZ Preview"
@@ -583,7 +598,7 @@ function FormulaPreview({ code }: { code: string }) {
   );
 }
 
-function CodeBlock({ language, code }: { language: string, code: string }) {
+function CopyCodeButton({ code }: { code: string }) {
   const [copied, setCopied] = useState(false);
 
   const handleCopy = async () => {
@@ -603,41 +618,133 @@ function CodeBlock({ language, code }: { language: string, code: string }) {
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const isTikz = code.includes('\\begin{tikzpicture}');
+  return (
+    <button
+      onClick={handleCopy}
+      aria-label="Copy code to clipboard"
+      className="flex items-center gap-1.5 text-xs font-medium text-white/50 hover:text-white transition-colors font-sans-brand"
+    >
+      {copied ? (
+        <>
+          <CheckCircle2 className="w-3.5 h-3.5 text-[#B9CF7C]" />
+          <span className="text-[#B9CF7C]">Copied</span>
+        </>
+      ) : (
+        <>
+          <Copy className="w-3.5 h-3.5" />
+          <span>Copy</span>
+        </>
+      )}
+    </button>
+  );
+}
+
+function CopyImageButton({ iframeRef }: { iframeRef: React.RefObject<HTMLIFrameElement | null> }) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopyImage = async () => {
+    try {
+      const iframe = iframeRef.current;
+      if (!iframe) return;
+      const svgEl = iframe.contentDocument?.querySelector('svg');
+      if (!svgEl) return;
+
+      const svgClone = svgEl.cloneNode(true) as SVGElement;
+      // Ensure the SVG has proper dimensions
+      if (!svgClone.getAttribute('xmlns')) {
+        svgClone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+      }
+      const svgData = new XMLSerializer().serializeToString(svgClone);
+      const svgBlob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
+      const url = URL.createObjectURL(svgBlob);
+
+      const img = new Image();
+      img.onload = async () => {
+        const canvas = document.createElement('canvas');
+        const scale = 2; // Higher resolution
+        canvas.width = img.width * scale;
+        canvas.height = img.height * scale;
+        const ctx = canvas.getContext('2d')!;
+        ctx.fillStyle = 'white';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.scale(scale, scale);
+        ctx.drawImage(img, 0, 0);
+        URL.revokeObjectURL(url);
+
+        canvas.toBlob(async (blob) => {
+          if (!blob) return;
+          try {
+            await navigator.clipboard.write([
+              new ClipboardItem({ 'image/png': blob })
+            ]);
+            setCopied(true);
+            setTimeout(() => setCopied(false), 2000);
+          } catch {
+            // Fallback: download the image
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = 'tikz-figure.png';
+            a.click();
+            URL.revokeObjectURL(a.href);
+            setCopied(true);
+            setTimeout(() => setCopied(false), 2000);
+          }
+        }, 'image/png');
+      };
+      img.src = url;
+    } catch {
+      // silently fail
+    }
+  };
 
   return (
-    <div className="my-6 rounded-xl overflow-hidden border border-[#00186E]/20 shadow-sm">
-      {/* Preview */}
-      <div className="bg-white">
-        <div className="px-4 py-2 bg-[#00186E]/5 border-b border-[#00186E]/10 text-xs font-semibold text-[#00186E]/60 uppercase tracking-wider font-sans-brand">
-          Preview
-        </div>
-        <div className="p-4">
-          {isTikz ? <TikzRenderer code={code} /> : <FormulaPreview code={code} />}
-        </div>
-      </div>
+    <button
+      onClick={handleCopyImage}
+      aria-label="Copy image to clipboard"
+      className="flex items-center gap-1.5 text-xs font-medium text-[#00186E]/50 hover:text-[#00186E] transition-colors font-sans-brand"
+    >
+      {copied ? (
+        <>
+          <CheckCircle2 className="w-3.5 h-3.5 text-green-600" />
+          <span className="text-green-600">Copied</span>
+        </>
+      ) : (
+        <>
+          <ImageDown className="w-3.5 h-3.5" />
+          <span>Copy Image</span>
+        </>
+      )}
+    </button>
+  );
+}
 
-      {/* Code */}
+function PreviewBlock({ title, icon, children, actions }: { title: string, icon: React.ReactNode, children: React.ReactNode, actions?: React.ReactNode }) {
+  return (
+    <div className="my-4 rounded-xl overflow-hidden border border-[#00186E]/20 shadow-sm bg-white">
+      <div className="flex items-center justify-between px-4 py-2 bg-[#00186E]/5 border-b border-[#00186E]/10">
+        <div className="flex items-center gap-1.5 text-xs font-semibold text-[#00186E]/60 uppercase tracking-wider font-sans-brand">
+          {icon}
+          {title}
+        </div>
+        {actions}
+      </div>
+      <div className="p-4">
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function CodeBlockPanel({ label, code }: { label: string, code: string }) {
+  return (
+    <div className="my-4 rounded-xl overflow-hidden border border-[#00186E]/20 shadow-sm">
       <div className="bg-[#00186E]">
         <div className="flex items-center justify-between px-4 py-2 bg-[#00186E] border-b border-white/10">
-          <span className="text-xs font-medium text-white/60 uppercase tracking-wider font-sans-brand">{language}</span>
-          <button
-            onClick={handleCopy}
-            aria-label="Copy code to clipboard"
-            className="flex items-center gap-1.5 text-xs font-medium text-white/50 hover:text-white transition-colors font-sans-brand"
-          >
-            {copied ? (
-              <>
-                <CheckCircle2 className="w-3.5 h-3.5 text-[#B9CF7C]" />
-                <span className="text-[#B9CF7C]">Copied</span>
-              </>
-            ) : (
-              <>
-                <Copy className="w-3.5 h-3.5" />
-                <span>Copy</span>
-              </>
-            )}
-          </button>
+          <div className="flex items-center gap-1.5 text-xs font-medium text-white/60 uppercase tracking-wider font-sans-brand">
+            <Code className="w-3.5 h-3.5" />
+            {label}
+          </div>
+          <CopyCodeButton code={code} />
         </div>
         <div className="p-4 overflow-x-auto">
           <pre className="!m-0 !p-0 !bg-transparent">
@@ -647,6 +754,82 @@ function CodeBlock({ language, code }: { language: string, code: string }) {
           </pre>
         </div>
       </div>
+    </div>
+  );
+}
+
+function CodeBlock({ language, code }: { language: string, code: string }) {
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+  const isTikz = code.includes('\\begin{tikzpicture}');
+
+  if (isTikz) {
+    return (
+      <>
+        {/* TikZ Preview Block */}
+        <PreviewBlock
+          title="TikZ Preview"
+          icon={<Eye className="w-3.5 h-3.5 mr-1" />}
+          actions={<CopyImageButton iframeRef={iframeRef} />}
+        >
+          <TikzRendererWithRef code={code} iframeRef={iframeRef} />
+        </PreviewBlock>
+
+        {/* TikZ Code Block */}
+        <CodeBlockPanel label="TikZ Code" code={code} />
+      </>
+    );
+  }
+
+  return (
+    <>
+      {/* Math Preview Block */}
+      <PreviewBlock
+        title="Math Preview"
+        icon={<Eye className="w-3.5 h-3.5 mr-1" />}
+      >
+        <FormulaPreview code={code} />
+      </PreviewBlock>
+
+      {/* Math Code Block */}
+      <CodeBlockPanel label="LaTeX Code" code={code} />
+    </>
+  );
+}
+
+function TikzRendererWithRef({ code, iframeRef }: { code: string, iframeRef: React.RefObject<HTMLIFrameElement | null> }) {
+  const [height, setHeight] = useState(350);
+  const idRef = useRef(Math.random().toString(36).slice(2));
+
+  useEffect(() => {
+    const handler = (e: MessageEvent) => {
+      if (e.data?.tikzId === idRef.current && typeof e.data.height === 'number') {
+        setHeight(Math.max(e.data.height, 200));
+      }
+    };
+    window.addEventListener('message', handler);
+    return () => window.removeEventListener('message', handler);
+  }, []);
+
+  const escapedCode = code.replace(/<\/script/gi, '<\\/script');
+  const tikzId = idRef.current;
+
+  const srcDoc = `<!DOCTYPE html><html><head>
+<link rel="stylesheet" type="text/css" href="https://tikzjax.com/v1/fonts.css">
+<script src="https://tikzjax.com/v1/tikzjax.js"><\/script>
+<style>html,body{margin:0;padding:16px;background:white;display:flex;justify-content:center;align-items:start;overflow:hidden;}</style>
+</head><body>
+<script type="text/tikz">${escapedCode}<\/script>
+<script>new MutationObserver(function(m,o){if(document.querySelector('svg')){o.disconnect();setTimeout(function(){window.parent.postMessage({tikzId:'${tikzId}',height:document.documentElement.scrollHeight},'*')},300)}}).observe(document.body,{childList:true,subtree:true});<\/script>
+</body></html>`;
+
+  return (
+    <div className="flex justify-center bg-white rounded-lg overflow-hidden min-h-[200px]">
+      <iframe
+        ref={iframeRef}
+        srcDoc={srcDoc}
+        style={{ border: 'none', width: '100%', height: `${height}px`, background: 'white' }}
+        title="TikZ Preview"
+      />
     </div>
   );
 }

@@ -15,6 +15,9 @@ import {
   WidthType,
   AlignmentType,
   BorderStyle,
+  ShadingType,
+  TableLayoutType,
+  VerticalAlignTable,
   convertInchesToTwip,
 } from 'docx';
 import { useDropzone } from 'react-dropzone';
@@ -59,32 +62,36 @@ interface PageContent {
 
 // ─── Gemini Prompt ───────────────────────────────────────────────────────────
 
-const PDF_ANALYSIS_PROMPT = `You are a PDF document analyzer. Analyze this PDF page image and extract ALL content in reading order.
+const PDF_ANALYSIS_PROMPT = `You are a precise PDF document analyzer. Extract ALL visible content from this page image and return it as structured JSON.
 
-Return ONLY a valid JSON object (no markdown code blocks, no explanations, no extra text). The response must start with { and end with }.
+RESPONSE FORMAT — return ONLY a raw JSON object. No markdown, no code fences, no explanation. The first character must be { and the last must be }.
 
-JSON structure:
 {
   "elements": [
     {"type": "heading", "level": 1, "content": "Section Title"},
-    {"type": "paragraph", "content": "Regular text. Use $x^2$ for inline math."},
+    {"type": "paragraph", "content": "Text with inline math like $x^2 + 1$."},
     {"type": "equation", "latex": "E = mc^2"},
-    {"type": "table", "rows": [["Header 1", "Header 2"], ["$\\\\frac{a}{b}$", "text value"]]},
+    {"type": "table", "rows": [["Header 1", "Header 2"], ["$\\\\frac{a}{b}$", "value"]]},
     {"type": "image", "bbox": [10, 20, 30, 25], "caption": "Figure 1: Description"}
   ]
 }
 
-Rules:
-1. Extract ALL content top-to-bottom, left-to-right in reading order
-2. "heading": for titles, section headers, chapter titles. Use level 1, 2, or 3
-3. "paragraph": for text blocks. Wrap inline math with $...$ delimiters
-4. "equation": for standalone/display equations on their own line. Put LaTeX WITHOUT $ delimiters in the "latex" field
-5. "table": for tables. Each cell is a string. Use $...$ for math within cells. Include header row as first row
-6. "image": for figures, diagrams, photos, charts. bbox = [x%, y%, width%, height%] as percentage of page dimensions. Include caption if visible
-7. Preserve ALL text EXACTLY as shown (including non-English characters)
-8. Convert ALL mathematical expressions to proper LaTeX notation
-9. For numbered lists or bullet points, include the number/bullet in the paragraph content
-10. Return ONLY the JSON object — no markdown formatting, no code blocks, no explanation`;
+ELEMENT RULES:
+- "heading": titles, section headers, chapter titles. level must be 1, 2, or 3. Content is plain text (no math delimiters unless the heading itself contains math).
+- "paragraph": text blocks, bullet points, numbered lists. Include the bullet/number in the content string. Wrap inline math with $...$ delimiters.
+- "equation": standalone display equations on their own line. The "latex" field must contain raw LaTeX WITHOUT $ delimiters. Use standard LaTeX: \\frac{a}{b}, \\sqrt{x}, \\int_{a}^{b}, \\sum_{i=1}^{n}, \\left( \\right), \\begin{cases}...\\end{cases}, etc.
+- "table": data tables. "rows" is an array of arrays. First row = header. Each cell is a string. Use $...$ for math in cells. Every row must have the same number of cells.
+- "image": figures, diagrams, charts, photos. "bbox" = [x%, y%, width%, height%] as percentages of page dimensions (0–100). Include "caption" only if a caption is visible in the image.
+
+CONTENT RULES:
+1. Read ALL content top-to-bottom, left-to-right. For multi-column layouts, read left column fully first, then right column.
+2. Preserve ALL text exactly as shown — including non-English characters (Vietnamese, etc.).
+3. Convert every mathematical expression to proper LaTeX. Never leave math as plain text.
+4. Inside JSON strings, backslashes must be escaped: write \\\\frac not \\frac, \\\\alpha not \\alpha, etc.
+5. If the page is blank or contains no extractable content, return: {"elements": []}
+6. Do NOT merge separate paragraphs into one. Keep each text block as its own element.
+7. Do NOT skip any content — headers, footers, page numbers, footnotes should all be captured.
+8. For equations that span multiple lines (e.g., aligned steps), emit each line as a separate "equation" element.`;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -230,8 +237,22 @@ function buildDocx(pages: PageContent[], fileName: string): DocxDocument {
 
         case 'table': {
           if (!el.rows || el.rows.length === 0) break;
+          const colCount = Math.max(...el.rows.map((r) => r.length));
+          const colWidth = Math.floor(100 / colCount);
+
+          const tableBorder = {
+            style: BorderStyle.SINGLE,
+            size: 4,
+            color: '999999',
+          };
+
           const tableRows = el.rows.map((row, rowIdx) => {
-            const cells = row.map((cellText) => {
+            const isHeader = rowIdx === 0;
+            // Pad row to colCount so every row has equal cells
+            const paddedRow = [...row];
+            while (paddedRow.length < colCount) paddedRow.push('');
+
+            const cells = paddedRow.map((cellText) => {
               const cellChildren = buildDocxParagraphChildren(cellText || '');
               return new TableCell({
                 children: [
@@ -240,16 +261,51 @@ function buildDocx(pages: PageContent[], fileName: string): DocxDocument {
                     spacing: { before: 40, after: 40 },
                   }),
                 ],
-                width: { size: Math.floor(100 / row.length), type: WidthType.PERCENTAGE },
+                width: { size: colWidth, type: WidthType.PERCENTAGE },
+                verticalAlign: VerticalAlignTable.CENTER,
+                margins: {
+                  marginUnitType: WidthType.DXA,
+                  top: 60,
+                  bottom: 60,
+                  left: 80,
+                  right: 80,
+                },
+                ...(isHeader
+                  ? {
+                      shading: {
+                        fill: 'D6E4F0',
+                        type: ShadingType.SOLID,
+                      },
+                    }
+                  : rowIdx % 2 === 0
+                    ? {
+                        shading: {
+                          fill: 'F2F2F2',
+                          type: ShadingType.SOLID,
+                        },
+                      }
+                    : {}),
               });
             });
-            return new TableRow({ children: cells });
+            return new TableRow({
+              children: cells,
+              tableHeader: isHeader,
+            });
           });
 
           children.push(
             new Table({
               rows: tableRows,
               width: { size: 100, type: WidthType.PERCENTAGE },
+              layout: TableLayoutType.FIXED,
+              borders: {
+                top: tableBorder,
+                bottom: tableBorder,
+                left: tableBorder,
+                right: tableBorder,
+                insideHorizontal: tableBorder,
+                insideVertical: tableBorder,
+              },
             })
           );
 
@@ -323,6 +379,26 @@ function buildDocx(pages: PageContent[], fileName: string): DocxDocument {
   }
 
   return new DocxDocument({
+    styles: {
+      default: {
+        document: {
+          run: { size: 24, font: { name: 'Cambria' } },
+          paragraph: { spacing: { line: 276 } },
+        },
+        heading1: {
+          run: { size: 32, bold: true, font: { name: 'Cambria' }, color: '1F3864' },
+          paragraph: { spacing: { before: 360, after: 160 } },
+        },
+        heading2: {
+          run: { size: 28, bold: true, font: { name: 'Cambria' }, color: '1F3864' },
+          paragraph: { spacing: { before: 280, after: 120 } },
+        },
+        heading3: {
+          run: { size: 24, bold: true, font: { name: 'Cambria' }, color: '1F3864' },
+          paragraph: { spacing: { before: 240, after: 100 } },
+        },
+      },
+    },
     sections: [
       {
         properties: {
@@ -528,7 +604,7 @@ export default function PdfToDocxConverter({ apiKey }: { apiKey: string }) {
 
         // Send to Gemini for analysis
         const response = await ai.models.generateContent({
-          model: 'gemini-2.0-flash',
+          model: 'gemini-pro-latest',
           contents: [
             {
               role: 'user',

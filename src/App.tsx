@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { GoogleGenAI } from '@google/genai';
-import { Upload, Image as ImageIcon, Loader2, Copy, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Upload, Image as ImageIcon, Loader2, Copy, CheckCircle2, AlertCircle, Key } from 'lucide-react';
 import { useDropzone } from 'react-dropzone';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -145,9 +145,9 @@ After all code blocks, add a short plain-text note (3–5 lines max):
 - If the image contains Vietnamese text labels (e.g. "Bài 1:", "đường thẳng AB"), include them as \\node labels or comments using UTF-8 encoding
 `;
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-
 export default function App() {
+  const [apiKey, setApiKey] = useState('');
+  const [apiKeySubmitted, setApiKeySubmitted] = useState(false);
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -215,9 +215,11 @@ export default function App() {
     setResult(null);
 
     try {
-      if (!process.env.GEMINI_API_KEY) {
-        throw new Error("Gemini API key is not set. Please set it in the environment variables.");
+      if (!apiKey) {
+        throw new Error("Please enter your Gemini API key first.");
       }
+
+      const ai = new GoogleGenAI({ apiKey });
 
       // Extract base64 data (remove the data:image/...;base64, part)
       const base64Data = imagePreview.split(',')[1];
@@ -225,7 +227,7 @@ export default function App() {
       const mimeType = mimeTypeMatch ? mimeTypeMatch[1] : 'image/jpeg';
 
       const response = await ai.models.generateContent({
-        model: 'gemini-2.5-pro-latest',
+        model: 'gemini-pro-latest',
         contents: [
           {
             role: 'user',
@@ -266,6 +268,58 @@ export default function App() {
     }
   };
 
+  if (!apiKeySubmitted) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="bg-white rounded-2xl shadow-lg border border-slate-200 p-8 max-w-md w-full"
+        >
+          <div className="flex items-center gap-3 mb-6">
+            <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center text-white font-bold text-2xl">
+              ∑
+            </div>
+            <div>
+              <h1 className="text-xl font-semibold text-slate-900">MathTeacherVision</h1>
+              <p className="text-sm text-slate-500">LaTeX & TikZ Assistant</p>
+            </div>
+          </div>
+
+          <div className="mb-6">
+            <label htmlFor="api-key" className="block text-sm font-medium text-slate-700 mb-2">
+              <Key className="w-4 h-4 inline mr-1.5 -mt-0.5" />
+              Gemini API Key
+            </label>
+            <input
+              id="api-key"
+              type="password"
+              value={apiKey}
+              onChange={(e) => setApiKey(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter' && apiKey.trim()) setApiKeySubmitted(true); }}
+              placeholder="Enter your Gemini API key..."
+              className="w-full px-4 py-3 border border-slate-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
+            />
+            <p className="mt-2 text-xs text-slate-500">
+              Get your free API key from{' '}
+              <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline">
+                Google AI Studio
+              </a>. Your key is only used in your browser and never stored on any server.
+            </p>
+          </div>
+
+          <button
+            onClick={() => { if (apiKey.trim()) setApiKeySubmitted(true); }}
+            disabled={!apiKey.trim()}
+            className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-3 px-4 rounded-xl shadow-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            Start Using MathTeacherVision
+          </button>
+        </motion.div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 font-sans">
       <header className="bg-white border-b border-slate-200 sticky top-0 z-10">
@@ -276,8 +330,16 @@ export default function App() {
             </div>
             <h1 className="text-xl font-semibold tracking-tight text-slate-900">MathTeacherVision</h1>
           </div>
-          <div className="text-sm text-slate-500 font-medium">
-            LaTeX & TikZ Assistant
+          <div className="flex items-center gap-3">
+            <div className="text-sm text-slate-500 font-medium">
+              LaTeX & TikZ Assistant
+            </div>
+            <button
+              onClick={() => { setApiKey(''); setApiKeySubmitted(false); }}
+              className="text-xs text-slate-400 hover:text-slate-600 border border-slate-200 rounded-lg px-2.5 py-1.5 transition-colors"
+            >
+              Change API Key
+            </button>
           </div>
         </div>
       </header>

@@ -33,6 +33,7 @@ import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import remarkGfm from 'remark-gfm';
 import { latexToMathChildren, parseTextWithMath } from './utils/latexToDocxMath';
+import { latexToImage, tikzToImage } from './utils/latexToImage';
 
 // ─── PDF.js Worker Setup ─────────────────────────────────────────────────────
 
@@ -45,10 +46,21 @@ interface DocumentElement {
   level?: number;
   content?: string;
   latex?: string;
+  tikz?: string;         // TikZ code for diagrams/figures
   rows?: string[][];
   bbox?: number[];
   caption?: string;
-  imageData?: string; // base64 data URL for cropped image
+  imageData?: string;     // base64 data URL for cropped image
+  equationImage?: {       // rendered equation as image
+    bytes: Uint8Array;
+    width: number;
+    height: number;
+  };
+  tikzImage?: {           // compiled TikZ as image
+    bytes: Uint8Array;
+    width: number;
+    height: number;
+  };
 }
 
 interface PageContent {
@@ -59,7 +71,7 @@ interface PageContent {
 
 // ─── Gemini Prompt ───────────────────────────────────────────────────────────
 
-const PDF_ANALYSIS_PROMPT = `You are a PDF document analyzer. Analyze this PDF page image and extract ALL content in reading order.
+const PDF_ANALYSIS_PROMPT = `You are a high-quality PDF document analyzer specializing in image-to-LaTeX conversion. Analyze this PDF page image and extract ALL content in reading order with maximum fidelity.
 
 Return ONLY a valid JSON object (no markdown code blocks, no explanations, no extra text). The response must start with { and end with }.
 
@@ -70,19 +82,27 @@ JSON structure:
     {"type": "paragraph", "content": "Regular text. Use $x^2$ for inline math."},
     {"type": "equation", "latex": "E = mc^2"},
     {"type": "table", "rows": [["Header 1", "Header 2"], ["$\\\\frac{a}{b}$", "text value"]]},
-    {"type": "image", "bbox": [10, 20, 30, 25], "caption": "Figure 1: Description"}
+    {"type": "image", "bbox": [10, 20, 30, 25], "caption": "Figure 1: Description", "tikz": "\\\\begin{tikzpicture}...\\\\end{tikzpicture}"}
   ]
 }
 
 Rules:
 1. Extract ALL content top-to-bottom, left-to-right in reading order
 2. "heading": for titles, section headers, chapter titles. Use level 1, 2, or 3
-3. "paragraph": for text blocks. Wrap inline math with $...$ delimiters
-4. "equation": for standalone/display equations on their own line. Put LaTeX WITHOUT $ delimiters in the "latex" field
-5. "table": for tables. Each cell is a string. Use $...$ for math within cells. Include header row as first row
-6. "image": for figures, diagrams, photos, charts. bbox = [x%, y%, width%, height%] as percentage of page dimensions. Include caption if visible
+3. "paragraph": for text blocks. Wrap inline math with $...$ delimiters. Treat every mathematical expression as an image-to-LaTeX task — reproduce the exact notation, symbols, spacing, and structure visible in the image
+4. "equation": for standalone/display equations on their own line. Put LaTeX WITHOUT $ delimiters in the "latex" field. Convert with image-to-LaTeX quality: capture every symbol, subscript, superscript, fraction, operator, and decoration exactly as shown
+5. "table": for tables. Each cell is a string. Use $...$ for LaTeX math or plain text in cells. Include header row as first row
+6. "image": for figures, diagrams, geometric drawings, charts, and graphs:
+   - bbox = [x%, y%, width%, height%] as percentage of page dimensions
+   - Include caption if visible
+   - IMPORTANT: For geometric figures, diagrams, graphs, and mathematical drawings, also generate a "tikz" field with complete TikZ code (\\begin{tikzpicture}...\\end{tikzpicture}) that faithfully reproduces the figure. Use TikZ libraries: calc, arrows.meta, decorations.markings, angles, quotes. Include labels, colors, line styles, and all visual details. For photos or non-geometric images, omit the "tikz" field.
 7. Preserve ALL text EXACTLY as shown (including non-English characters)
-8. Convert ALL mathematical expressions to proper LaTeX notation
+8. Convert ALL mathematical expressions to proper LaTeX notation with maximum accuracy:
+   - Use \\frac{}{} for fractions, \\sqrt{} for roots, \\widehat{} for angle notation
+   - Use \\overrightarrow{} for vectors/rays, \\triangle for triangles
+   - Use correct Greek letters (\\alpha, \\beta, \\gamma, etc.)
+   - Use \\left( \\right) for auto-sized delimiters
+   - Reproduce every detail: superscripts, subscripts, decorations, operators
 9. For numbered lists or bullet points, include the number/bullet in the paragraph content
 10. Return ONLY the JSON object — no markdown formatting, no code blocks, no explanation`;
 
@@ -206,24 +226,49 @@ function buildDocx(pages: PageContent[], fileName: string): DocxDocument {
 
         case 'equation': {
           if (!el.latex) break;
-          try {
-            const mathChildren = latexToMathChildren(el.latex);
+
+          // Prefer rendered equation image for highest quality
+          if (el.equationImage) {
+            const { bytes, width, height } = el.equationImage;
+            const maxWidth = 500;
+            const scale = width > maxWidth ? maxWidth / width : 1;
             children.push(
               new Paragraph({
-                children: [new OfficeMath({ children: mathChildren })],
+                children: [
+                  new ImageRun({
+                    data: bytes,
+                    transformation: {
+                      width: Math.round(width * scale),
+                      height: Math.round(height * scale),
+                    },
+                    type: 'png',
+                  }),
+                ],
                 alignment: AlignmentType.CENTER,
                 spacing: { before: 120, after: 120 },
               })
             );
-          } catch {
-            // Fallback: insert as text
-            children.push(
-              new Paragraph({
-                children: [new TextRun({ text: el.latex, italics: true })],
-                alignment: AlignmentType.CENTER,
-                spacing: { before: 120, after: 120 },
-              })
-            );
+          } else {
+            // Fallback: OMML equation
+            try {
+              const mathChildren = latexToMathChildren(el.latex);
+              children.push(
+                new Paragraph({
+                  children: [new OfficeMath({ children: mathChildren })],
+                  alignment: AlignmentType.CENTER,
+                  spacing: { before: 120, after: 120 },
+                })
+              );
+            } catch {
+              // Fallback: insert as text
+              children.push(
+                new Paragraph({
+                  children: [new TextRun({ text: el.latex, italics: true })],
+                  alignment: AlignmentType.CENTER,
+                  spacing: { before: 120, after: 120 },
+                })
+              );
+            }
           }
           break;
         }
@@ -259,49 +304,49 @@ function buildDocx(pages: PageContent[], fileName: string): DocxDocument {
         }
 
         case 'image': {
-          if (el.imageData && el.bbox && page.pageCanvas) {
-            try {
-              const { bytes, width, height } = cropImageFromCanvas(page.pageCanvas, el.bbox);
-              // Scale image to fit within page width (max ~6 inches = 432pt)
-              const maxWidth = 500;
-              const scale = width > maxWidth ? maxWidth / width : 1;
-              const imgWidth = Math.round(width * scale);
-              const imgHeight = Math.round(height * scale);
+          // Prefer TikZ-compiled image over cropped image for diagrams
+          const imgSource = el.tikzImage
+            ? el.tikzImage
+            : el.imageData && el.bbox && page.pageCanvas
+              ? (() => {
+                  try {
+                    return cropImageFromCanvas(page.pageCanvas, el.bbox);
+                  } catch {
+                    return null;
+                  }
+                })()
+              : null;
 
+          if (imgSource) {
+            const { bytes, width, height } = imgSource;
+            const maxWidth = 500;
+            const scale = width > maxWidth ? maxWidth / width : 1;
+            const imgWidth = Math.round(width * scale);
+            const imgHeight = Math.round(height * scale);
+
+            children.push(
+              new Paragraph({
+                children: [
+                  new ImageRun({
+                    data: bytes,
+                    transformation: { width: imgWidth, height: imgHeight },
+                    type: 'png',
+                  }),
+                ],
+                alignment: AlignmentType.CENTER,
+                spacing: { before: 120, after: 60 },
+              })
+            );
+
+            // Caption
+            if (el.caption) {
               children.push(
                 new Paragraph({
-                  children: [
-                    new ImageRun({
-                      data: bytes,
-                      transformation: { width: imgWidth, height: imgHeight },
-                      type: 'png',
-                    }),
-                  ],
+                  children: [new TextRun({ text: el.caption, italics: true, size: 20 })],
                   alignment: AlignmentType.CENTER,
-                  spacing: { before: 120, after: 60 },
+                  spacing: { after: 120 },
                 })
               );
-
-              // Caption
-              if (el.caption) {
-                children.push(
-                  new Paragraph({
-                    children: [new TextRun({ text: el.caption, italics: true, size: 20 })],
-                    alignment: AlignmentType.CENTER,
-                    spacing: { after: 120 },
-                  })
-                );
-              }
-            } catch {
-              // Skip image on error
-              if (el.caption) {
-                children.push(
-                  new Paragraph({
-                    children: [new TextRun({ text: `[Image: ${el.caption}]`, italics: true })],
-                    spacing: { after: 120 },
-                  })
-                );
-              }
             }
           } else if (el.caption) {
             children.push(
@@ -441,6 +486,16 @@ function PreviewElement({ element }: { element: DocumentElement }) {
                 alt={element.caption || 'Extracted image'}
                 className="max-w-full h-auto inline-block rounded-lg border border-[#00186E]/10"
               />
+              {element.tikz && (
+                <details className="mt-2 text-left inline-block max-w-lg">
+                  <summary className="text-xs text-[#00186E]/40 cursor-pointer font-sans-brand hover:text-[#00186E]/60">
+                    TikZ code generated
+                  </summary>
+                  <pre className="mt-1 text-xs bg-[#00186E]/5 rounded-lg p-3 overflow-x-auto text-[#00186E]/70 whitespace-pre-wrap">
+                    {element.tikz}
+                  </pre>
+                </details>
+              )}
               {element.caption && (
                 <p className="text-sm text-[#00186E]/50 italic mt-2 font-sans-brand">
                   {element.caption}
@@ -551,11 +606,33 @@ export default function PdfToDocxConverter({ apiKey }: { apiKey: string }) {
         const responseText = response.text || '';
         const elements = parseGeminiResponse(responseText);
 
-        // Extract images from detected regions
+        // Process elements: extract images, render equations, compile TikZ
         for (const el of elements) {
           if (el.type === 'image' && el.bbox && el.bbox.length === 4) {
             const { dataUrl } = cropImageFromCanvas(canvas, el.bbox);
             el.imageData = dataUrl;
+
+            // If TikZ code was generated for this image, compile it to a rendered image
+            if (el.tikz) {
+              try {
+                const tikzResult = await tikzToImage(el.tikz);
+                if (tikzResult) {
+                  el.tikzImage = tikzResult;
+                }
+              } catch {
+                // TikZ compilation failed — fall back to cropped image
+              }
+            }
+          }
+
+          // Render display equations as images for high-quality Word output
+          if (el.type === 'equation' && el.latex) {
+            try {
+              const eqImg = await latexToImage(el.latex, true);
+              el.equationImage = eqImg;
+            } catch {
+              // Equation image rendering failed — will fall back to OMML
+            }
           }
         }
 
@@ -766,15 +843,19 @@ export default function PdfToDocxConverter({ apiKey }: { apiKey: string }) {
               <li>Upload a PDF file with text, equations, tables, and images.</li>
               <li>
                 AI analyzes each page to detect structure and convert equations to{' '}
-                <strong>LaTeX</strong>.
+                <strong>LaTeX</strong>, quality as image to LaTeX.
               </li>
               <li>
-                Equations are converted to <strong>editable Word equations</strong>.
+                Equations are converted to LaTeX equation as image to LaTeX{' '}
+                <code className="text-xs bg-[#00186E]/5 px-1 rounded">$...$</code> and put in Word.
               </li>
               <li>
-                Tables are preserved as <strong>Word tables</strong> with math in each cell.
+                Tables are preserved as <strong>Word tables</strong> with LaTeX math or text in each cell.
               </li>
-              <li>Images are extracted and placed at correct positions.</li>
+              <li>
+                Images are extracted, then generate <strong>TikZ code</strong>, compile to image,
+                and placed at correct positions.
+              </li>
             </ul>
           </div>
         </div>

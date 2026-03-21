@@ -10,7 +10,7 @@ import { motion } from 'framer-motion';
 
 const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20MB
 
-const SYSTEM_INSTRUCTION = `You are MathTeacherVision, an expert assistant for mathematics teachers in Vietnam.
+const SYSTEM_INSTRUCTION = `You are MathVision, an expert assistant for mathematics teachers in Vietnam.
 You help teachers convert handwritten or printed math content from images into clean, ready-to-use LaTeX — either TikZ figures or inline/display formulas.
 
 ## Behavior
@@ -294,24 +294,24 @@ export default function App() {
 
   if (!apiKeySubmitted) {
     return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
+      <div className="min-h-screen bg-[#f8f7f4] flex items-center justify-center p-4">
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          className="bg-white rounded-2xl shadow-lg border border-slate-200 p-8 max-w-md w-full"
+          className="bg-white rounded-2xl shadow-lg border border-[#00186E]/10 p-8 max-w-md w-full"
         >
           <div className="flex items-center gap-3 mb-6">
-            <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center text-white font-bold text-2xl">
+            <div className="w-10 h-10 bg-[#00186E] rounded-xl flex items-center justify-center text-white font-bold text-2xl">
               ∑
             </div>
             <div>
-              <h1 className="text-xl font-semibold text-slate-900">MathTeacherVision</h1>
-              <p className="text-sm text-slate-500">LaTeX & TikZ Assistant</p>
+              <h1 className="text-xl font-semibold text-[#00186E] font-serif-brand">MathVision</h1>
+              <p className="text-sm text-[#00186E]/50 font-sans-brand">LaTeX & TikZ Assistant</p>
             </div>
           </div>
 
           <div className="mb-6">
-            <label htmlFor="api-key" className="block text-sm font-medium text-slate-700 mb-2">
+            <label htmlFor="api-key" className="block text-sm font-medium text-[#00186E]/70 mb-2 font-sans-brand">
               <Key className="w-4 h-4 inline mr-1.5 -mt-0.5" />
               Gemini API Key
             </label>
@@ -322,11 +322,11 @@ export default function App() {
               onChange={(e) => setApiKey(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter' && apiKey.trim()) setApiKeySubmitted(true); }}
               placeholder="Enter your Gemini API key..."
-              className="w-full px-4 py-3 border border-slate-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
+              className="w-full px-4 py-3 border border-[#00186E]/20 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#FFAD1D] focus:border-[#FFAD1D] transition-colors font-sans-brand"
             />
-            <p className="mt-2 text-xs text-slate-500">
+            <p className="mt-2 text-xs text-[#00186E]/50 font-sans-brand">
               Get your free API key from{' '}
-              <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline">
+              <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer" className="text-[#FFAD1D] hover:underline font-medium">
                 Google AI Studio
               </a>. Your key is only used in your browser and never stored on any server.
             </p>
@@ -335,9 +335,9 @@ export default function App() {
           <button
             onClick={() => { if (apiKey.trim()) setApiKeySubmitted(true); }}
             disabled={!apiKey.trim()}
-            className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-3 px-4 rounded-xl shadow-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            className="w-full bg-[#00186E] hover:bg-[#001050] text-white font-medium py-3 px-4 rounded-xl shadow-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed font-sans-brand"
           >
-            Start Using MathTeacherVision
+            Start Using MathVision
           </button>
         </motion.div>
       </div>
@@ -345,22 +345,22 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 font-sans">
-      <header className="bg-white border-b border-slate-200 sticky top-0 z-10">
-        <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+    <div className="min-h-screen bg-[#f8f7f4] text-[#00186E]">
+      <header className="bg-[#00186E] sticky top-0 z-10">
+        <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center text-white font-bold text-xl">
+            <div className="w-8 h-8 bg-[#FFAD1D] rounded-lg flex items-center justify-center text-[#00186E] font-bold text-xl">
               ∑
             </div>
-            <h1 className="text-xl font-semibold tracking-tight text-slate-900">MathTeacherVision</h1>
+            <h1 className="text-xl font-semibold tracking-tight text-white font-serif-brand">MathVision</h1>
           </div>
           <div className="flex items-center gap-3">
-            <div className="text-sm text-slate-500 font-medium">
+            <div className="text-sm text-white/60 font-medium font-sans-brand">
               LaTeX & TikZ Assistant
             </div>
             <button
               onClick={() => { setApiKey(''); setApiKeySubmitted(false); setResult(null); setError(null); }}
-              className="text-xs text-slate-400 hover:text-slate-600 border border-slate-200 rounded-lg px-2.5 py-1.5 transition-colors"
+              className="text-xs text-white/50 hover:text-white border border-white/20 rounded-lg px-2.5 py-1.5 transition-colors font-sans-brand"
             >
               Change API Key
             </button>
@@ -368,132 +368,124 @@ export default function App() {
         </div>
       </header>
 
-      <main className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-          
-          {/* Left Column: Upload & Preview */}
-          <div className="lg:col-span-5 space-y-6">
-            <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-              <div className="p-4 border-b border-slate-100 bg-slate-50/50">
-                <h2 className="font-medium text-slate-800 flex items-center gap-2">
-                  <ImageIcon className="w-4 h-4 text-indigo-500" />
-                  Input Image
-                </h2>
+      <main className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
+        {/* Upload Section */}
+        <div className="bg-white rounded-2xl shadow-sm border border-[#00186E]/10 overflow-hidden">
+          <div className="p-4 border-b border-[#00186E]/5 bg-[#00186E]/[0.02]">
+            <h2 className="font-medium text-[#00186E] flex items-center gap-2 font-sans-brand">
+              <ImageIcon className="w-4 h-4 text-[#FFAD1D]" />
+              Input Image
+            </h2>
+          </div>
+
+          <div className="p-4">
+            {!imagePreview ? (
+              <div
+                {...getRootProps()}
+                role="button"
+                aria-label="Upload an image of math content"
+                className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-colors duration-200 ${
+                  isDragActive ? 'border-[#FFAD1D] bg-[#FFAD1D]/10' : 'border-[#00186E]/20 hover:border-[#FFAD1D] hover:bg-[#FFAD1D]/5'
+                }`}
+              >
+                <input {...getInputProps()} />
+                <Upload className="w-10 h-10 text-[#00186E]/30 mx-auto mb-4" />
+                <p className="text-sm font-medium text-[#00186E]/70 mb-1 font-sans-brand">
+                  Drag & drop an image here
+                </p>
+                <p className="text-xs text-[#00186E]/40 font-sans-brand">
+                  or click to select a file (PNG, JPG, WebP — max 20MB)
+                </p>
               </div>
-              
-              <div className="p-4">
-                {!imagePreview ? (
-                  <div
-                    {...getRootProps()}
-                    role="button"
-                    aria-label="Upload an image of math content"
-                    className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-colors duration-200 ${
-                      isDragActive ? 'border-indigo-500 bg-indigo-50/50' : 'border-slate-300 hover:border-indigo-400 hover:bg-slate-50'
-                    }`}
-                  >
-                    <input {...getInputProps()} />
-                    <Upload className="w-10 h-10 text-slate-400 mx-auto mb-4" />
-                    <p className="text-sm font-medium text-slate-700 mb-1">
-                      Drag & drop an image here
-                    </p>
-                    <p className="text-xs text-slate-500">
-                      or click to select a file (PNG, JPG, WebP — max 20MB)
-                    </p>
-                  </div>
-                ) : (
-                  <div className="space-y-4">
-                    <div className="relative rounded-xl overflow-hidden border border-slate-200 bg-slate-100 group">
-                      <img 
-                        src={imagePreview} 
-                        alt="Uploaded math content" 
-                        className="w-full h-auto max-h-[400px] object-contain"
-                      />
-                      <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                        <button 
-                          {...getRootProps()}
-                          className="bg-white text-slate-900 px-4 py-2 rounded-lg text-sm font-medium shadow-sm hover:bg-slate-50 transition-colors"
-                        >
-                          <input {...getInputProps()} />
-                          Replace Image
-                        </button>
-                      </div>
-                    </div>
-                    
+            ) : (
+              <div className="space-y-4">
+                <div className="relative rounded-xl overflow-hidden border border-[#00186E]/10 bg-[#f8f7f4] group">
+                  <img
+                    src={imagePreview}
+                    alt="Uploaded math content"
+                    className="w-full h-auto max-h-[400px] object-contain"
+                  />
+                  <div className="absolute inset-0 bg-[#00186E]/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                     <button
-                      onClick={processImage}
-                      disabled={isProcessing}
-                      className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-3 px-4 rounded-xl shadow-sm transition-colors disabled:opacity-70 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                      {...getRootProps()}
+                      className="bg-white text-[#00186E] px-4 py-2 rounded-lg text-sm font-medium shadow-sm hover:bg-[#f8f7f4] transition-colors font-sans-brand"
                     >
-                      {isProcessing ? (
-                        <>
-                          <Loader2 className="w-5 h-5 animate-spin" />
-                          Processing Image...
-                        </>
-                      ) : (
-                        <>
-                          Convert to LaTeX
-                        </>
-                      )}
+                      <input {...getInputProps()} />
+                      Replace Image
                     </button>
                   </div>
-                )}
-              </div>
-            </div>
+                </div>
 
-            {/* Instructions Card */}
-            <div className="bg-indigo-50/50 rounded-2xl border border-indigo-100 p-5">
-              <h3 className="text-sm font-semibold text-indigo-900 mb-2">How it works</h3>
-              <ul className="text-sm text-indigo-800/80 space-y-2 list-disc list-inside">
-                <li>Upload a photo or screenshot of math problems or geometric figures.</li>
-                <li>The AI will generate compilable <strong>TikZ</strong> code for geometry.</li>
-                <li>It will generate clean <strong>LaTeX</strong> for formulas (MathType compatible).</li>
-                <li>Results are formatted exactly as shown, without solving.</li>
-              </ul>
-            </div>
+                <button
+                  onClick={processImage}
+                  disabled={isProcessing}
+                  className="w-full bg-[#FFAD1D] hover:bg-[#e89c10] text-[#00186E] font-semibold py-3 px-4 rounded-xl shadow-sm transition-colors disabled:opacity-70 disabled:cursor-not-allowed flex items-center justify-center gap-2 font-sans-brand"
+                >
+                  {isProcessing ? (
+                    <>
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                      Processing Image...
+                    </>
+                  ) : (
+                    <>
+                      Convert to LaTeX
+                    </>
+                  )}
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Instructions Card */}
+        <div className="bg-[#B9CF7C]/20 rounded-2xl border border-[#B9CF7C]/40 p-5">
+          <h3 className="text-sm font-semibold text-[#00186E] mb-2 font-sans-brand">How it works</h3>
+          <ul className="text-sm text-[#00186E]/70 space-y-2 list-disc list-inside font-serif-brand">
+            <li>Upload a photo or screenshot of math problems or geometric figures.</li>
+            <li>The AI will generate compilable <strong>TikZ</strong> code for geometry.</li>
+            <li>It will generate clean <strong>LaTeX</strong> for formulas (MathType compatible).</li>
+            <li>Results are formatted exactly as shown, without solving.</li>
+          </ul>
+        </div>
+
+        {/* Output Section */}
+        <div className="bg-white rounded-2xl shadow-sm border border-[#00186E]/10 min-h-[400px] flex flex-col overflow-hidden">
+          <div className="p-4 border-b border-[#00186E]/5 bg-[#00186E]/[0.02] flex items-center justify-between">
+            <h2 className="font-medium text-[#00186E] flex items-center gap-2 font-sans-brand">
+              Output
+            </h2>
           </div>
 
-          {/* Right Column: Results */}
-          <div className="lg:col-span-7">
-            <div className="bg-white rounded-2xl shadow-sm border border-slate-200 h-full min-h-[600px] flex flex-col overflow-hidden">
-              <div className="p-4 border-b border-slate-100 bg-slate-50/50 flex items-center justify-between">
-                <h2 className="font-medium text-slate-800 flex items-center gap-2">
-                  Output
-                </h2>
+          <div className="flex-1 p-0 overflow-y-auto">
+            {isProcessing ? (
+              <div className="h-full flex flex-col items-center justify-center text-[#00186E]/40 space-y-4 p-8">
+                <Loader2 className="w-10 h-10 animate-spin text-[#FFAD1D]" />
+                <p className="text-sm font-medium animate-pulse font-sans-brand">Analyzing math content and generating LaTeX...</p>
               </div>
-              
-              <div className="flex-1 p-0 overflow-y-auto bg-slate-50/30">
-                {isProcessing ? (
-                  <div className="h-full flex flex-col items-center justify-center text-slate-400 space-y-4 p-8">
-                    <Loader2 className="w-10 h-10 animate-spin text-indigo-500" />
-                    <p className="text-sm font-medium animate-pulse">Analyzing math content and generating LaTeX...</p>
+            ) : error ? (
+              <div className="p-6">
+                <div className="bg-red-50 text-red-800 rounded-xl p-4 flex items-start gap-3 border border-red-100">
+                  <AlertCircle className="w-5 h-5 text-red-500 shrink-0 mt-0.5" />
+                  <div>
+                    <h3 className="font-medium mb-1 font-sans-brand">Error processing image</h3>
+                    <p className="text-sm text-red-700/90">{error}</p>
                   </div>
-                ) : error ? (
-                  <div className="p-6">
-                    <div className="bg-red-50 text-red-800 rounded-xl p-4 flex items-start gap-3 border border-red-100">
-                      <AlertCircle className="w-5 h-5 text-red-500 shrink-0 mt-0.5" />
-                      <div>
-                        <h3 className="font-medium mb-1">Error processing image</h3>
-                        <p className="text-sm text-red-700/90">{error}</p>
-                      </div>
-                    </div>
-                  </div>
-                ) : result ? (
-                  <div className="p-6">
-                    <ResultRenderer content={result} />
-                  </div>
-                ) : (
-                  <div className="h-full flex flex-col items-center justify-center text-slate-400 p-8 text-center">
-                    <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mb-4">
-                      <span className="text-2xl font-serif italic text-slate-300">f(x)</span>
-                    </div>
-                    <p className="text-sm font-medium text-slate-500">No output yet</p>
-                    <p className="text-xs text-slate-400 mt-1 max-w-xs">Upload an image and click "Convert to LaTeX" to see the results here.</p>
-                  </div>
-                )}
+                </div>
               </div>
-            </div>
+            ) : result ? (
+              <div className="p-6">
+                <ResultRenderer content={result} />
+              </div>
+            ) : (
+              <div className="h-full flex flex-col items-center justify-center text-[#00186E]/30 p-8 text-center">
+                <div className="w-16 h-16 bg-[#00186E]/5 rounded-full flex items-center justify-center mb-4">
+                  <span className="text-2xl font-serif-brand italic text-[#00186E]/20">f(x)</span>
+                </div>
+                <p className="text-sm font-medium text-[#00186E]/50 font-sans-brand">No output yet</p>
+                <p className="text-xs text-[#00186E]/30 mt-1 max-w-xs font-sans-brand">Upload an image and click "Convert to LaTeX" to see the results here.</p>
+              </div>
+            )}
           </div>
-
         </div>
       </main>
     </div>
@@ -519,7 +511,7 @@ function ResultRenderer({ content }: { content: string }) {
             }
             
             return (
-              <code className="bg-slate-100 text-indigo-600 px-1.5 py-0.5 rounded-md font-mono text-xs" {...props}>
+              <code className="bg-[#00186E]/5 text-[#00186E] px-1.5 py-0.5 rounded-md font-mono text-xs" {...props}>
                 {children}
               </code>
             );
@@ -546,7 +538,7 @@ function TikzRenderer({ code }: { code: string }) {
   }, [code]);
 
   return (
-    <div className="flex justify-center bg-white p-4 rounded-lg overflow-auto min-h-[200px] border border-slate-200">
+    <div className="flex justify-center bg-white p-4 rounded-lg overflow-auto min-h-[200px] border border-[#00186E]/10">
       <div ref={ref} />
     </div>
   );
@@ -554,7 +546,7 @@ function TikzRenderer({ code }: { code: string }) {
 
 function FormulaPreview({ code }: { code: string }) {
   return (
-    <div className="bg-white p-4 rounded-lg text-slate-900 overflow-auto prose prose-slate max-w-none border border-slate-200 min-h-[200px]">
+    <div className="bg-white p-4 rounded-lg text-[#00186E] overflow-auto prose prose-slate max-w-none border border-[#00186E]/10 min-h-[200px]">
       <ReactMarkdown
         remarkPlugins={[remarkMath]}
         rehypePlugins={[rehypeKatex]}
@@ -567,13 +559,11 @@ function FormulaPreview({ code }: { code: string }) {
 
 function CodeBlock({ language, code }: { language: string, code: string }) {
   const [copied, setCopied] = useState(false);
-  const [view, setView] = useState<'both' | 'code' | 'preview'>('both');
 
   const handleCopy = async () => {
     try {
       await navigator.clipboard.writeText(code);
     } catch {
-      // Fallback for HTTP or restricted contexts
       const textarea = document.createElement('textarea');
       textarea.value = code;
       textarea.style.position = 'fixed';
@@ -590,80 +580,46 @@ function CodeBlock({ language, code }: { language: string, code: string }) {
   const isTikz = code.includes('\\begin{tikzpicture}');
 
   return (
-    <div className="my-6 rounded-xl overflow-hidden border border-slate-200 bg-slate-900 shadow-sm">
-      <div className="flex items-center justify-between px-4 py-2 bg-slate-800 border-b border-slate-700">
-        <div className="flex items-center gap-4">
-          <span className="text-xs font-medium text-slate-300 uppercase tracking-wider">{language}</span>
-          <div className="flex bg-slate-700 rounded-md p-0.5">
-            <button 
-              onClick={() => setView('preview')}
-              className={`px-2.5 py-1 text-xs font-medium rounded-sm transition-colors ${view === 'preview' ? 'bg-slate-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}
-            >
-              Preview
-            </button>
-            <button 
-              onClick={() => setView('code')}
-              className={`px-2.5 py-1 text-xs font-medium rounded-sm transition-colors ${view === 'code' ? 'bg-slate-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}
-            >
-              Code
-            </button>
-            <button 
-              onClick={() => setView('both')}
-              className={`px-2.5 py-1 text-xs font-medium rounded-sm transition-colors ${view === 'both' ? 'bg-slate-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}
-            >
-              Split
-            </button>
-          </div>
+    <div className="my-6 rounded-xl overflow-hidden border border-[#00186E]/20 shadow-sm">
+      {/* Preview */}
+      <div className="bg-white">
+        <div className="px-4 py-2 bg-[#00186E]/5 border-b border-[#00186E]/10 text-xs font-semibold text-[#00186E]/60 uppercase tracking-wider font-sans-brand">
+          Preview
         </div>
-        <button
-          onClick={handleCopy}
-          aria-label="Copy code to clipboard"
-          className="flex items-center gap-1.5 text-xs font-medium text-slate-400 hover:text-white transition-colors"
-        >
-          {copied ? (
-            <>
-              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-              <span className="text-emerald-400">Copied</span>
-            </>
-          ) : (
-            <>
-              <Copy className="w-3.5 h-3.5" />
-              <span>Copy</span>
-            </>
-          )}
-        </button>
+        <div className="p-4">
+          {isTikz ? <TikzRenderer code={code} /> : <FormulaPreview code={code} />}
+        </div>
       </div>
-      
-      <div className={`flex flex-col ${view === 'both' ? 'lg:flex-row' : ''} divide-y lg:divide-y-0 lg:divide-x divide-slate-700`}>
-        {(view === 'preview' || view === 'both') && (
-          <div className={`flex flex-col bg-slate-50 ${view === 'both' ? 'lg:w-1/2' : 'w-full'}`}>
-            {view === 'both' && (
-              <div className="px-4 py-2 bg-slate-100 border-b border-slate-200 text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                Preview
-              </div>
+
+      {/* Code */}
+      <div className="bg-[#00186E]">
+        <div className="flex items-center justify-between px-4 py-2 bg-[#00186E] border-b border-white/10">
+          <span className="text-xs font-medium text-white/60 uppercase tracking-wider font-sans-brand">{language}</span>
+          <button
+            onClick={handleCopy}
+            aria-label="Copy code to clipboard"
+            className="flex items-center gap-1.5 text-xs font-medium text-white/50 hover:text-white transition-colors font-sans-brand"
+          >
+            {copied ? (
+              <>
+                <CheckCircle2 className="w-3.5 h-3.5 text-[#B9CF7C]" />
+                <span className="text-[#B9CF7C]">Copied</span>
+              </>
+            ) : (
+              <>
+                <Copy className="w-3.5 h-3.5" />
+                <span>Copy</span>
+              </>
             )}
-            <div className="p-4 flex-1">
-              {isTikz ? <TikzRenderer code={code} /> : <FormulaPreview code={code} />}
-            </div>
-          </div>
-        )}
-        
-        {(view === 'code' || view === 'both') && (
-          <div className={`flex flex-col ${view === 'both' ? 'lg:w-1/2' : 'w-full'}`}>
-            {view === 'both' && (
-              <div className="px-4 py-2 bg-slate-800/50 border-b border-slate-700 text-xs font-semibold text-slate-400 uppercase tracking-wider">
-                LaTeX Code
-              </div>
-            )}
-            <div className="p-4 overflow-x-auto flex-1">
-              <pre className="!m-0 !p-0 !bg-transparent">
-                <code className="text-sm font-mono text-slate-50 leading-relaxed whitespace-pre">
-                  {code}
-                </code>
-              </pre>
-            </div>
-          </div>
-        )}
+          </button>
+        </div>
+        <div className="p-4 overflow-x-auto">
+          <pre className="!m-0 !p-0 !bg-transparent">
+            <code className="text-sm font-mono text-white/90 leading-relaxed whitespace-pre">
+              {code}
+            </code>
+          </pre>
+        </div>
       </div>
     </div>
   );

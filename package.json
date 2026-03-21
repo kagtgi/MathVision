@@ -1,9 +1,9 @@
 {
-  "name": "math-teacher-vision",
+  "name": "math-vision",
   "private": true,
   "version": "1.0.0",
   "description": "An expert AI assistant for mathematics teachers — converts handwritten or printed math content from images into clean, ready-to-use LaTeX and TikZ code.",
-  "author": "MathTeacherVision Team",
+  "author": "MathVision Team",
   "license": "MIT",
   "type": "module",
   "scripts": {

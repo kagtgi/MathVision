@@ -1,1 +1,25 @@
 @import "tailwindcss";
+
+@theme {
+  --font-serif-brand: "Garamond Premier Pro", "EB Garamond", "Cormorant Garamond", Garamond, "Times New Roman", serif;
+  --font-sans-brand: "Halyard Display", "Inter", "Helvetica Neue", Arial, sans-serif;
+  --color-resolution-blue: #00186E;
+  --color-my-sin: #FFAD1D;
+  --color-wild-willow: #B9CF7C;
+}
+
+@layer base {
+  body {
+    font-family: var(--font-serif-brand);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+}
+
+.font-serif-brand {
+  font-family: var(--font-serif-brand);
+}
+
+.font-sans-brand {
+  font-family: var(--font-sans-brand);
+}

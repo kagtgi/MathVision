@@ -225,7 +225,7 @@ export default function App() {
       const mimeType = mimeTypeMatch ? mimeTypeMatch[1] : 'image/jpeg';
 
       const response = await ai.models.generateContent({
-        model: 'gemini-3.1-pro-preview',
+        model: 'gemini-2.0-flash',
         contents: [
           {
             role: 'user',
@@ -243,11 +243,8 @@ export default function App() {
           }
         ],
         config: {
-          systemInstruction: {
-            role: 'system',
-            parts: [{ text: SYSTEM_INSTRUCTION }]
-          },
-          temperature: 0.2, // Low temperature for more deterministic/accurate output
+          systemInstruction: SYSTEM_INSTRUCTION,
+          temperature: 0.2,
         },
       });
 
@@ -256,9 +253,14 @@ export default function App() {
       } else {
         setError("No text returned from the model.");
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("Error processing image:", err);
-      setError(err.message || "An error occurred while processing the image.");
+      const message = err instanceof Error ? err.message : String(err);
+      if (message.includes('not valid JSON') || message.includes('Failed to execute')) {
+        setError("Failed to get a valid response from the AI service. Please check your API key and try again.");
+      } else {
+        setError(message || "An error occurred while processing the image.");
+      }
     } finally {
       setIsProcessing(false);
     }

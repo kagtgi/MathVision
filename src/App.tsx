@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { GoogleGenAI } from '@google/genai';
 import { Upload, Image as ImageIcon, Loader2, Copy, CheckCircle2, AlertCircle, Key } from 'lucide-react';
 import { useDropzone } from 'react-dropzone';
@@ -6,7 +6,9 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
+
+const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20MB
 
 const SYSTEM_INSTRUCTION = `You are MathTeacherVision, an expert assistant for mathematics teachers in Vietnam.
 You help teachers convert handwritten or printed math content from images into clean, ready-to-use LaTeX — either TikZ figures or inline/display formulas.
@@ -156,47 +158,63 @@ export default function App() {
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
     const file = acceptedFiles[0];
-    if (file) {
-      setImageFile(file);
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        const img = new Image();
-        img.onload = () => {
-          const canvas = document.createElement('canvas');
-          const MAX_WIDTH = 1024;
-          const MAX_HEIGHT = 1024;
-          let width = img.width;
-          let height = img.height;
+    if (!file) return;
 
-          if (width > height) {
-            if (width > MAX_WIDTH) {
-              height *= MAX_WIDTH / width;
-              width = MAX_WIDTH;
-            }
-          } else {
-            if (height > MAX_HEIGHT) {
-              width *= MAX_HEIGHT / height;
-              height = MAX_HEIGHT;
-            }
-          }
-
-          canvas.width = width;
-          canvas.height = height;
-          const ctx = canvas.getContext('2d');
-          if (ctx) {
-            ctx.drawImage(img, 0, 0, width, height);
-            const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
-            setImagePreview(dataUrl);
-          } else {
-            setImagePreview(reader.result as string);
-          }
-        };
-        img.src = reader.result as string;
-      };
-      reader.readAsDataURL(file);
-      setResult(null);
-      setError(null);
+    if (file.size > MAX_FILE_SIZE) {
+      setError(`File is too large (${(file.size / 1024 / 1024).toFixed(1)}MB). Maximum size is 20MB.`);
+      return;
     }
+
+    setImageFile(file);
+    setResult(null);
+    setError(null);
+
+    const reader = new FileReader();
+    reader.onerror = () => {
+      setError("Failed to read the image file. Please try again.");
+    };
+    reader.onloadend = () => {
+      if (typeof reader.result !== 'string') {
+        setError("Failed to read the image file. Please try again.");
+        return;
+      }
+      const img = new window.Image();
+      img.onerror = () => {
+        setError("The file could not be loaded as an image. Please use a PNG, JPG, or WebP file.");
+      };
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const MAX_WIDTH = 1024;
+        const MAX_HEIGHT = 1024;
+        let width = img.width;
+        let height = img.height;
+
+        if (width > height) {
+          if (width > MAX_WIDTH) {
+            height *= MAX_WIDTH / width;
+            width = MAX_WIDTH;
+          }
+        } else {
+          if (height > MAX_HEIGHT) {
+            width *= MAX_HEIGHT / height;
+            height = MAX_HEIGHT;
+          }
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(img, 0, 0, width, height);
+          const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
+          setImagePreview(dataUrl);
+        } else {
+          setImagePreview(reader.result as string);
+        }
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
   }, []);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
@@ -204,7 +222,8 @@ export default function App() {
     accept: {
       'image/*': ['.png', '.jpg', '.jpeg', '.webp']
     },
-    maxFiles: 1
+    maxFiles: 1,
+    maxSize: MAX_FILE_SIZE,
   });
 
   const processImage = async () => {
@@ -258,10 +277,15 @@ export default function App() {
     } catch (err: unknown) {
       console.error("Error processing image:", err);
       const message = err instanceof Error ? err.message : String(err);
-      if (message.includes('not valid JSON') || message.includes('Failed to execute')) {
-        setError("Failed to get a valid response from the AI service. Please check your API key and try again.");
+      const lowerMessage = message.toLowerCase();
+      if (lowerMessage.includes('api key') || lowerMessage.includes('401') || lowerMessage.includes('403') || lowerMessage.includes('authenticate')) {
+        setError("Invalid API key. Please check your Gemini API key and try again. You can get a key at https://aistudio.google.com/apikey");
+      } else if (lowerMessage.includes('quota') || lowerMessage.includes('429') || lowerMessage.includes('rate')) {
+        setError("API rate limit reached. Please wait a moment and try again.");
+      } else if (lowerMessage.includes('network') || lowerMessage.includes('fetch') || lowerMessage.includes('failed to fetch')) {
+        setError("Network error. Please check your internet connection and try again.");
       } else {
-        setError(message || "An error occurred while processing the image.");
+        setError(message || "An unexpected error occurred. Please try again.");
       }
     } finally {
       setIsProcessing(false);
@@ -335,7 +359,7 @@ export default function App() {
               LaTeX & TikZ Assistant
             </div>
             <button
-              onClick={() => { setApiKey(''); setApiKeySubmitted(false); }}
+              onClick={() => { setApiKey(''); setApiKeySubmitted(false); setResult(null); setError(null); }}
               className="text-xs text-slate-400 hover:text-slate-600 border border-slate-200 rounded-lg px-2.5 py-1.5 transition-colors"
             >
               Change API Key
@@ -359,8 +383,10 @@ export default function App() {
               
               <div className="p-4">
                 {!imagePreview ? (
-                  <div 
-                    {...getRootProps()} 
+                  <div
+                    {...getRootProps()}
+                    role="button"
+                    aria-label="Upload an image of math content"
                     className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-colors duration-200 ${
                       isDragActive ? 'border-indigo-500 bg-indigo-50/50' : 'border-slate-300 hover:border-indigo-400 hover:bg-slate-50'
                     }`}
@@ -371,7 +397,7 @@ export default function App() {
                       Drag & drop an image here
                     </p>
                     <p className="text-xs text-slate-500">
-                      or click to select a file
+                      or click to select a file (PNG, JPG, WebP — max 20MB)
                     </p>
                   </div>
                 ) : (
@@ -543,8 +569,20 @@ function CodeBlock({ language, code }: { language: string, code: string }) {
   const [copied, setCopied] = useState(false);
   const [view, setView] = useState<'both' | 'code' | 'preview'>('both');
 
-  const handleCopy = () => {
-    navigator.clipboard.writeText(code);
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(code);
+    } catch {
+      // Fallback for HTTP or restricted contexts
+      const textarea = document.createElement('textarea');
+      textarea.value = code;
+      textarea.style.position = 'fixed';
+      textarea.style.opacity = '0';
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textarea);
+    }
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
@@ -579,6 +617,7 @@ function CodeBlock({ language, code }: { language: string, code: string }) {
         </div>
         <button
           onClick={handleCopy}
+          aria-label="Copy code to clipboard"
           className="flex items-center gap-1.5 text-xs font-medium text-slate-400 hover:text-white transition-colors"
         >
           {copied ? (

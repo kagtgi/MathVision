@@ -14,7 +14,6 @@ import {
   ImageRun,
   WidthType,
   AlignmentType,
-  BorderStyle,
   convertInchesToTwip,
 } from 'docx';
 import { useDropzone } from 'react-dropzone';
@@ -27,6 +26,11 @@ import {
   ChevronRight,
   FileDown,
   RotateCcw,
+  X,
+  Copy,
+  CheckCircle2,
+  ZoomIn,
+  ZoomOut,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkMath from 'remark-math';
@@ -389,7 +393,6 @@ function buildDocx(pages: PageContent[], fileName: string): DocxDocument {
 // ─── Preview Components ──────────────────────────────────────────────────────
 
 function InlineMathText({ text }: { text: string }) {
-  // Split text on $...$ and render with KaTeX via ReactMarkdown
   return (
     <ReactMarkdown
       remarkPlugins={[remarkMath, remarkGfm]}
@@ -403,17 +406,17 @@ function InlineMathText({ text }: { text: string }) {
   );
 }
 
-function PreviewElement({ element }: { element: DocumentElement }) {
+function DocxPageElement({ element }: { element: DocumentElement }) {
   switch (element.type) {
     case 'heading': {
-      const classes: Record<number, string> = {
-        1: 'text-2xl font-bold mt-6 mb-3 text-[#00186E]',
-        2: 'text-xl font-semibold mt-5 mb-2 text-[#00186E]',
-        3: 'text-lg font-medium mt-4 mb-2 text-[#00186E]/90',
+      const styles: Record<number, string> = {
+        1: 'text-[16pt] font-bold mt-[18pt] mb-[8pt] text-[#1a1a1a] tracking-tight leading-snug',
+        2: 'text-[13pt] font-bold mt-[14pt] mb-[6pt] text-[#2a2a2a] leading-snug',
+        3: 'text-[11pt] font-bold mt-[12pt] mb-[4pt] text-[#3a3a3a] leading-snug',
       };
-      const cls = classes[element.level || 1] || classes[1];
+      const style = styles[element.level || 1] || styles[1];
       return (
-        <div className={`${cls} font-sans-brand`}>
+        <div className={style} style={{ fontFamily: '"Calibri", "Segoe UI", sans-serif' }}>
           <InlineMathText text={element.content || ''} />
         </div>
       );
@@ -421,18 +424,18 @@ function PreviewElement({ element }: { element: DocumentElement }) {
 
     case 'paragraph':
       return (
-        <div className="mb-3 text-[#00186E]/80 leading-relaxed font-serif-brand">
+        <div
+          className="mb-[6pt] text-[11pt] text-[#1a1a1a] leading-[1.5]"
+          style={{ fontFamily: '"Calibri", "Segoe UI", sans-serif' }}
+        >
           <InlineMathText text={element.content || ''} />
         </div>
       );
 
     case 'equation':
       return (
-        <div className="my-4 text-center">
-          <ReactMarkdown
-            remarkPlugins={[remarkMath]}
-            rehypePlugins={[rehypeKatex]}
-          >
+        <div className="my-[10pt] text-center px-[20pt]">
+          <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
             {`$$${element.latex || ''}$$`}
           </ReactMarkdown>
         </div>
@@ -441,14 +444,17 @@ function PreviewElement({ element }: { element: DocumentElement }) {
     case 'table': {
       if (!element.rows || element.rows.length === 0) return null;
       return (
-        <div className="my-4 overflow-x-auto">
-          <table className="w-full border-collapse border border-[#00186E]/20 text-sm">
+        <div className="my-[10pt] overflow-x-auto">
+          <table
+            className="w-full border-collapse text-[10pt]"
+            style={{ fontFamily: '"Calibri", "Segoe UI", sans-serif' }}
+          >
             <thead>
-              <tr className="bg-[#00186E]/5 font-semibold">
+              <tr>
                 {element.rows[0].map((cell, ci) => (
                   <th
                     key={ci}
-                    className="border border-[#00186E]/20 px-3 py-2 text-left"
+                    className="border border-[#8eaadb] bg-[#4472c4] text-white px-[6pt] py-[4pt] text-left font-semibold"
                   >
                     <InlineMathText text={cell || ''} />
                   </th>
@@ -458,11 +464,11 @@ function PreviewElement({ element }: { element: DocumentElement }) {
             {element.rows.length > 1 && (
               <tbody>
                 {element.rows.slice(1).map((row, ri) => (
-                  <tr key={ri}>
+                  <tr key={ri} className={ri % 2 === 0 ? 'bg-[#d9e2f3]' : 'bg-white'}>
                     {row.map((cell, ci) => (
                       <td
                         key={ci}
-                        className="border border-[#00186E]/20 px-3 py-2 text-left"
+                        className="border border-[#8eaadb] px-[6pt] py-[4pt] text-left text-[#1a1a1a]"
                       >
                         <InlineMathText text={cell || ''} />
                       </td>
@@ -478,32 +484,39 @@ function PreviewElement({ element }: { element: DocumentElement }) {
 
     case 'image':
       return (
-        <div className="my-4 text-center">
+        <div className="my-[10pt] text-center">
           {element.imageData ? (
-            <>
+            <div className="inline-block">
               <img
                 src={element.imageData}
-                alt={element.caption || 'Extracted image'}
-                className="max-w-full h-auto inline-block rounded-lg border border-[#00186E]/10"
+                alt={element.caption || 'Figure'}
+                className="max-w-full h-auto border border-gray-200"
+                style={{ maxHeight: '300px' }}
               />
               {element.tikz && (
-                <details className="mt-2 text-left inline-block max-w-lg">
-                  <summary className="text-xs text-[#00186E]/40 cursor-pointer font-sans-brand hover:text-[#00186E]/60">
-                    TikZ code generated
+                <details className="mt-[4pt] text-left">
+                  <summary className="text-[8pt] text-gray-400 cursor-pointer hover:text-gray-600" style={{ fontFamily: '"Calibri", sans-serif' }}>
+                    View TikZ source
                   </summary>
-                  <pre className="mt-1 text-xs bg-[#00186E]/5 rounded-lg p-3 overflow-x-auto text-[#00186E]/70 whitespace-pre-wrap">
+                  <pre className="mt-[2pt] text-[7pt] bg-gray-50 border border-gray-200 rounded p-2 overflow-x-auto text-gray-600 whitespace-pre-wrap font-mono">
                     {element.tikz}
                   </pre>
                 </details>
               )}
               {element.caption && (
-                <p className="text-sm text-[#00186E]/50 italic mt-2 font-sans-brand">
+                <p
+                  className="text-[9pt] text-gray-500 italic mt-[4pt]"
+                  style={{ fontFamily: '"Calibri", sans-serif' }}
+                >
                   {element.caption}
                 </p>
               )}
-            </>
+            </div>
           ) : (
-            <div className="inline-block bg-[#00186E]/5 rounded-lg px-6 py-4 text-[#00186E]/40 text-sm font-sans-brand">
+            <div
+              className="inline-block bg-gray-50 border border-gray-200 px-[16pt] py-[10pt] text-gray-400 text-[9pt]"
+              style={{ fontFamily: '"Calibri", sans-serif' }}
+            >
               [Image{element.caption ? `: ${element.caption}` : ''}]
             </div>
           )}
@@ -515,6 +528,172 @@ function PreviewElement({ element }: { element: DocumentElement }) {
   }
 }
 
+// ─── Claude-style Document Viewer ───────────────────────────────────────────
+
+function DocxViewer({
+  pages,
+  fileName,
+  onDownload,
+  isGenerating,
+  onClose,
+}: {
+  pages: PageContent[];
+  fileName: string;
+  onDownload: () => void;
+  isGenerating: boolean;
+  onClose: () => void;
+}) {
+  const [zoom, setZoom] = useState(100);
+  const [copied, setCopied] = useState(false);
+
+  const totalElements = pages.reduce((acc, p) => acc + p.elements.length, 0);
+
+  const handleCopyText = async () => {
+    // Extract all text content for clipboard
+    const textParts: string[] = [];
+    for (const page of pages) {
+      for (const el of page.elements) {
+        if (el.type === 'heading' || el.type === 'paragraph') {
+          textParts.push(el.content || '');
+        } else if (el.type === 'equation') {
+          textParts.push(`$$${el.latex || ''}$$`);
+        } else if (el.type === 'table' && el.rows) {
+          textParts.push(el.rows.map((r) => r.join('\t')).join('\n'));
+        } else if (el.type === 'image' && el.caption) {
+          textParts.push(`[Figure: ${el.caption}]`);
+        }
+      }
+    }
+    try {
+      await navigator.clipboard.writeText(textParts.join('\n\n'));
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // clipboard not available
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex flex-col bg-[#2b2b2b]">
+      {/* ─── Toolbar ─── */}
+      <div className="flex items-center justify-between px-4 py-2.5 bg-[#1e1e1e] border-b border-[#3a3a3a] shrink-0">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="w-8 h-8 bg-[#4285f4]/20 rounded-lg flex items-center justify-center shrink-0">
+            <FileText className="w-4 h-4 text-[#4285f4]" />
+          </div>
+          <div className="min-w-0">
+            <h3 className="text-sm font-medium text-white truncate">
+              {fileName}.docx
+            </h3>
+            <p className="text-[10px] text-gray-400">
+              {pages.length} page{pages.length !== 1 ? 's' : ''} &middot; {totalElements} elements
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-1">
+          {/* Zoom controls */}
+          <button
+            onClick={() => setZoom((z) => Math.max(50, z - 10))}
+            className="p-1.5 text-gray-400 hover:text-white hover:bg-white/10 rounded-md transition-colors"
+            title="Zoom out"
+          >
+            <ZoomOut className="w-4 h-4" />
+          </button>
+          <span className="text-xs text-gray-400 w-10 text-center tabular-nums">{zoom}%</span>
+          <button
+            onClick={() => setZoom((z) => Math.min(200, z + 10))}
+            className="p-1.5 text-gray-400 hover:text-white hover:bg-white/10 rounded-md transition-colors"
+            title="Zoom in"
+          >
+            <ZoomIn className="w-4 h-4" />
+          </button>
+
+          <div className="w-px h-5 bg-[#3a3a3a] mx-1" />
+
+          {/* Copy text */}
+          <button
+            onClick={handleCopyText}
+            className="p-1.5 text-gray-400 hover:text-white hover:bg-white/10 rounded-md transition-colors"
+            title="Copy text content"
+          >
+            {copied ? <CheckCircle2 className="w-4 h-4 text-green-400" /> : <Copy className="w-4 h-4" />}
+          </button>
+
+          {/* Download */}
+          <button
+            onClick={onDownload}
+            disabled={isGenerating}
+            className="ml-1 flex items-center gap-1.5 px-3 py-1.5 bg-[#4285f4] hover:bg-[#3275e4] text-white text-xs font-medium rounded-lg transition-colors disabled:opacity-60"
+          >
+            {isGenerating ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <Download className="w-3.5 h-3.5" />
+            )}
+            {isGenerating ? 'Generating...' : 'Download'}
+          </button>
+
+          <div className="w-px h-5 bg-[#3a3a3a] mx-1" />
+
+          {/* Close */}
+          <button
+            onClick={onClose}
+            className="p-1.5 text-gray-400 hover:text-white hover:bg-white/10 rounded-md transition-colors"
+            title="Close preview"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      </div>
+
+      {/* ─── Document body — scrollable area with paper pages ─── */}
+      <div className="flex-1 overflow-auto py-8 px-4">
+        <div
+          className="mx-auto flex flex-col items-center gap-8"
+          style={{ transform: `scale(${zoom / 100})`, transformOrigin: 'top center' }}
+        >
+          {pages.map((page, pageIdx) => (
+            <div
+              key={pageIdx}
+              className="bg-white shadow-[0_2px_8px_rgba(0,0,0,0.3)] relative"
+              style={{
+                width: '8.5in',
+                minHeight: '11in',
+                padding: '1in',
+                boxSizing: 'border-box',
+              }}
+            >
+              {/* Page number label */}
+              <div
+                className="absolute top-3 right-4 text-[8pt] text-gray-300 select-none"
+                style={{ fontFamily: '"Calibri", sans-serif' }}
+              >
+                Page {page.pageNumber}
+              </div>
+
+              {/* Page content */}
+              <div className="relative">
+                {page.elements.map((el, elIdx) => (
+                  <DocxPageElement key={`${pageIdx}-${elIdx}`} element={el} />
+                ))}
+                {page.elements.length === 0 && (
+                  <div
+                    className="text-gray-300 text-[10pt] italic text-center py-[40pt]"
+                    style={{ fontFamily: '"Calibri", sans-serif' }}
+                  >
+                    (empty page)
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Main Component ──────────────────────────────────────────────────────────
 
 export default function PdfToDocxConverter({ apiKey }: { apiKey: string }) {
@@ -524,6 +703,7 @@ export default function PdfToDocxConverter({ apiKey }: { apiKey: string }) {
   const [documentContent, setDocumentContent] = useState<PageContent[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isGeneratingDocx, setIsGeneratingDocx] = useState(false);
+  const [showViewer, setShowViewer] = useState(false);
   const pageCanvasesRef = useRef<Map<number, HTMLCanvasElement>>(new Map());
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
@@ -644,6 +824,7 @@ export default function PdfToDocxConverter({ apiKey }: { apiKey: string }) {
       }
 
       setDocumentContent(allPages);
+      setShowViewer(true);
       setProgress({ current: totalPages, total: totalPages, status: 'Done!' });
     } catch (err: unknown) {
       console.error('Error processing PDF:', err);
@@ -696,14 +877,28 @@ export default function PdfToDocxConverter({ apiKey }: { apiKey: string }) {
     setPdfFile(null);
     setDocumentContent(null);
     setError(null);
+    setShowViewer(false);
     setProgress({ current: 0, total: 0, status: '' });
     pageCanvasesRef.current.clear();
   };
 
+  const fileName = pdfFile?.name?.replace(/\.pdf$/i, '') || 'document';
+
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
-        {/* Left Column — Input */}
+    <>
+      {/* ─── Fullscreen Document Viewer (Claude-style artifact) ─── */}
+      {showViewer && documentContent && (
+        <DocxViewer
+          pages={documentContent}
+          fileName={fileName}
+          onDownload={downloadDocx}
+          isGenerating={isGeneratingDocx}
+          onClose={() => setShowViewer(false)}
+        />
+      )}
+
+      {/* ─── Main input UI ─── */}
+      <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="space-y-6">
           {/* Upload Section */}
           <div className="bg-white rounded-2xl shadow-sm border border-[#00186E]/10 overflow-hidden">
@@ -779,34 +974,46 @@ export default function PdfToDocxConverter({ apiKey }: { apiKey: string }) {
                     </div>
                   )}
 
+                  {/* Error */}
+                  {error && (
+                    <div className="bg-red-50 text-red-800 rounded-xl p-4 flex items-start gap-3 border border-red-100">
+                      <AlertCircle className="w-5 h-5 text-red-500 shrink-0 mt-0.5" />
+                      <div>
+                        <h3 className="font-medium mb-1 font-sans-brand">Error</h3>
+                        <p className="text-sm text-red-700/90">{error}</p>
+                      </div>
+                    </div>
+                  )}
+
                   {/* Convert button */}
-                  {!documentContent && (
+                  {!documentContent && !isProcessing && (
                     <button
                       onClick={processPdf}
                       disabled={isProcessing}
                       className="w-full bg-[#FFAD1D] hover:bg-[#e89c10] text-[#00186E] font-semibold py-3 px-4 rounded-xl shadow-sm transition-colors disabled:opacity-70 disabled:cursor-not-allowed flex items-center justify-center gap-2 font-sans-brand"
                     >
-                      {isProcessing ? (
-                        <>
-                          <Loader2 className="w-5 h-5 animate-spin" />
-                          Processing PDF...
-                        </>
-                      ) : (
-                        <>
-                          <ChevronRight className="w-5 h-5" />
-                          Convert to DOCX
-                        </>
-                      )}
+                      <ChevronRight className="w-5 h-5" />
+                      Convert to DOCX
                     </button>
                   )}
 
-                  {/* Download button (shown after processing) */}
+                  {/* Post-processing actions */}
                   {documentContent && (
                     <div className="space-y-3">
+                      {/* Open document viewer */}
+                      <button
+                        onClick={() => setShowViewer(true)}
+                        className="w-full bg-[#00186E] hover:bg-[#001050] text-white font-semibold py-3 px-4 rounded-xl shadow-sm transition-colors flex items-center justify-center gap-2 font-sans-brand"
+                      >
+                        <FileDown className="w-5 h-5" />
+                        View Document
+                      </button>
+
+                      {/* Download */}
                       <button
                         onClick={downloadDocx}
                         disabled={isGeneratingDocx}
-                        className="w-full bg-[#00186E] hover:bg-[#001050] text-white font-semibold py-3 px-4 rounded-xl shadow-sm transition-colors disabled:opacity-70 disabled:cursor-not-allowed flex items-center justify-center gap-2 font-sans-brand"
+                        className="w-full border-2 border-[#00186E] text-[#00186E] hover:bg-[#00186E]/5 font-semibold py-3 px-4 rounded-xl transition-colors disabled:opacity-70 disabled:cursor-not-allowed flex items-center justify-center gap-2 font-sans-brand"
                       >
                         {isGeneratingDocx ? (
                           <>
@@ -820,6 +1027,7 @@ export default function PdfToDocxConverter({ apiKey }: { apiKey: string }) {
                           </>
                         )}
                       </button>
+
                       <button
                         onClick={reset}
                         className="w-full border border-[#00186E]/20 text-[#00186E]/70 hover:text-[#00186E] hover:border-[#00186E]/40 font-medium py-2.5 px-4 rounded-xl transition-colors flex items-center justify-center gap-2 font-sans-brand text-sm"
@@ -859,107 +1067,7 @@ export default function PdfToDocxConverter({ apiKey }: { apiKey: string }) {
             </ul>
           </div>
         </div>
-
-        {/* Right Column — Preview */}
-        <div className="lg:sticky lg:top-24">
-          <div className="bg-white rounded-2xl shadow-sm border border-[#00186E]/10 min-h-[400px] lg:min-h-[calc(100vh-8rem)] flex flex-col overflow-hidden">
-            <div className="p-4 border-b border-[#00186E]/5 bg-[#00186E]/[0.02] flex items-center justify-between">
-              <h2 className="font-medium text-[#00186E] flex items-center gap-2 font-sans-brand">
-                <FileDown className="w-4 h-4 text-[#FFAD1D]" />
-                Document Preview
-              </h2>
-              {documentContent && (
-                <span className="text-xs text-[#00186E]/40 font-sans-brand">
-                  {documentContent.length} page{documentContent.length !== 1 ? 's' : ''}
-                </span>
-              )}
-            </div>
-
-            <div className="flex-1 p-0 overflow-y-auto">
-              {isProcessing ? (
-                <div className="h-full flex flex-col items-center justify-center text-[#00186E]/40 space-y-4 p-8">
-                  <Loader2 className="w-10 h-10 animate-spin text-[#FFAD1D]" />
-                  <div className="text-center">
-                    <p className="text-sm font-medium animate-pulse font-sans-brand">
-                      {progress.status || 'Analyzing PDF...'}
-                    </p>
-                    {progress.total > 0 && (
-                      <p className="text-xs text-[#00186E]/30 mt-1 font-sans-brand">
-                        Page {progress.current} of {progress.total}
-                      </p>
-                    )}
-                  </div>
-                </div>
-              ) : error ? (
-                <div className="p-6">
-                  <div className="bg-red-50 text-red-800 rounded-xl p-4 flex items-start gap-3 border border-red-100">
-                    <AlertCircle className="w-5 h-5 text-red-500 shrink-0 mt-0.5" />
-                    <div>
-                      <h3 className="font-medium mb-1 font-sans-brand">
-                        Error processing PDF
-                      </h3>
-                      <p className="text-sm text-red-700/90">{error}</p>
-                    </div>
-                  </div>
-                </div>
-              ) : documentContent ? (
-                <div className="p-6">
-                  {/* DOCX Preview */}
-                  <div className="bg-white border border-[#00186E]/10 rounded-xl shadow-inner p-6 min-h-[300px]">
-                    {documentContent.map((page, pageIdx) => (
-                      <div key={pageIdx}>
-                        {pageIdx > 0 && (
-                          <div className="border-t-2 border-dashed border-[#00186E]/10 my-6 relative">
-                            <span className="absolute -top-3 left-1/2 -translate-x-1/2 bg-white px-3 text-xs text-[#00186E]/30 font-sans-brand">
-                              Page {page.pageNumber}
-                            </span>
-                          </div>
-                        )}
-                        {page.elements.map((el, elIdx) => (
-                          <PreviewElement key={`${pageIdx}-${elIdx}`} element={el} />
-                        ))}
-                      </div>
-                    ))}
-                  </div>
-
-                  {/* Download button in preview */}
-                  <div className="mt-6 text-center">
-                    <button
-                      onClick={downloadDocx}
-                      disabled={isGeneratingDocx}
-                      className="inline-flex items-center gap-2 bg-[#00186E] hover:bg-[#001050] text-white font-semibold py-3 px-8 rounded-xl shadow-sm transition-colors disabled:opacity-70 font-sans-brand"
-                    >
-                      {isGeneratingDocx ? (
-                        <>
-                          <Loader2 className="w-5 h-5 animate-spin" />
-                          Generating...
-                        </>
-                      ) : (
-                        <>
-                          <Download className="w-5 h-5" />
-                          Download DOCX
-                        </>
-                      )}
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <div className="h-full flex flex-col items-center justify-center text-[#00186E]/30 p-8 text-center">
-                  <div className="w-16 h-16 bg-[#00186E]/5 rounded-full flex items-center justify-center mb-4">
-                    <FileText className="w-7 h-7 text-[#00186E]/20" />
-                  </div>
-                  <p className="text-sm font-medium text-[#00186E]/50 font-sans-brand">
-                    No document yet
-                  </p>
-                  <p className="text-xs text-[#00186E]/30 mt-1 max-w-xs font-sans-brand">
-                    Upload a PDF and click "Convert to DOCX" to see the preview here.
-                  </p>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
       </div>
-    </div>
+    </>
   );
 }

@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef } from 'react';
 import { GoogleGenAI } from '@google/genai';
-import * as pdfjsLib from 'pdfjs-dist/build/pdf.mjs';
+import * as pdfjsLib from 'pdfjs-dist';
 import {
   Document as DocxDocument,
   Packer,
@@ -398,21 +398,34 @@ function PreviewElement({ element }: { element: DocumentElement }) {
       return (
         <div className="my-4 overflow-x-auto">
           <table className="w-full border-collapse border border-[#00186E]/20 text-sm">
-            {element.rows.map((row, ri) => (
-              <tr key={ri} className={ri === 0 ? 'bg-[#00186E]/5 font-semibold' : ''}>
-                {row.map((cell, ci) => {
-                  const Tag = ri === 0 ? 'th' : 'td';
-                  return (
-                    <Tag
-                      key={ci}
-                      className="border border-[#00186E]/20 px-3 py-2 text-left"
-                    >
-                      <InlineMathText text={cell || ''} />
-                    </Tag>
-                  );
-                })}
+            <thead>
+              <tr className="bg-[#00186E]/5 font-semibold">
+                {element.rows[0].map((cell, ci) => (
+                  <th
+                    key={ci}
+                    className="border border-[#00186E]/20 px-3 py-2 text-left"
+                  >
+                    <InlineMathText text={cell || ''} />
+                  </th>
+                ))}
               </tr>
-            ))}
+            </thead>
+            {element.rows.length > 1 && (
+              <tbody>
+                {element.rows.slice(1).map((row, ri) => (
+                  <tr key={ri}>
+                    {row.map((cell, ci) => (
+                      <td
+                        key={ci}
+                        className="border border-[#00186E]/20 px-3 py-2 text-left"
+                      >
+                        <InlineMathText text={cell || ''} />
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            )}
           </table>
         </div>
       );

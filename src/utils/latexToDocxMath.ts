@@ -417,7 +417,6 @@ class LatexParser {
 
   private parseCasesContent(): MathComponent[] {
     const items: MathComponent[] = [];
-    let first = true;
 
     while (this.peek().type !== 'EOF') {
       if (this.peek().type === 'COMMAND' && this.peek().value === '\\end') {
@@ -429,7 +428,6 @@ class LatexParser {
       if (this.peek().type === 'COMMAND' && this.peek().value === '\\\\') {
         this.consume();
         items.push(new MathRun(', '));
-        first = false;
         continue;
       }
 

@@ -1,10 +1,10 @@
 @echo off
-REM MathTeacherVision - Quick Start Script for Windows
+REM MathVision - Quick Start Script for Windows
 REM Just double-click this file and the app will start!
 
 echo.
 echo ============================================
-echo    MathTeacherVision - Starting Up...
+echo    MathVision - Starting Up...
 echo ============================================
 echo.
 
@@ -37,7 +37,7 @@ if not exist "node_modules" (
 
 echo.
 echo ============================================
-echo    Starting MathTeacherVision...
+echo    Starting MathVision...
 echo ============================================
 echo.
 echo The app will open at: http://localhost:3000
@@ -51,6 +51,7 @@ echo.
 echo Close this window to stop the server.
 echo.
 
-REM Start the dev server
+REM Open the browser after a short delay, then start the dev server
+start "" http://localhost:3000
 call npm run dev
 pause

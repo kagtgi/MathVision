@@ -11,6 +11,9 @@ export default defineConfig(() => {
         '@': path.resolve(__dirname, '.'),
       },
     },
+    optimizeDeps: {
+      include: ['pdfjs-dist'],
+    },
     build: {
       rollupOptions: {
         output: {

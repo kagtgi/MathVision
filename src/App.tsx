@@ -133,8 +133,6 @@ Transcribe all mathematical content into clean LaTeX suitable for MathType, Over
 
 Output format:
 \`\`\`latex
-% Paste directly into MathType or any LaTeX editor
-
 $x^2 + y^2 = r^2$
 $\\left( x - a \\right)^2 + \\left( y - b \\right)^2 = r^2$
 $\\alpha = 90{}^\\circ$

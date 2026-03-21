@@ -1,7 +1,10 @@
 {
-  "name": "react-example",
+  "name": "math-teacher-vision",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
+  "description": "An expert AI assistant for mathematics teachers — converts handwritten or printed math content from images into clean, ready-to-use LaTeX and TikZ code.",
+  "author": "MathTeacherVision Team",
+  "license": "MIT",
   "type": "module",
   "scripts": {
     "dev": "vite --port=3000 --host=0.0.0.0",

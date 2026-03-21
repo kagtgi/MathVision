@@ -1,12 +1,15 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { GoogleGenAI } from '@google/genai';
-import { Upload, Image as ImageIcon, Loader2, Copy, CheckCircle2, AlertCircle, Key, ImageDown, Eye, Code } from 'lucide-react';
+import { Upload, Image as ImageIcon, Loader2, Copy, CheckCircle2, AlertCircle, Key, ImageDown, Eye, Code, FileText, ArrowRightLeft } from 'lucide-react';
 import { useDropzone } from 'react-dropzone';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import { motion } from 'framer-motion';
+import PdfToDocxConverter from './PdfToDocxConverter';
+
+type AppMode = 'image-to-latex' | 'pdf-to-docx';
 
 const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20MB
 
@@ -302,6 +305,7 @@ $\{y\}' = 2x$
 export default function App() {
   const [apiKey, setApiKey] = useState('');
   const [apiKeySubmitted, setApiKeySubmitted] = useState(false);
+  const [appMode, setAppMode] = useState<AppMode>('image-to-latex');
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -502,16 +506,49 @@ export default function App() {
     <div className="min-h-screen bg-[#f8f7f4] text-[#00186E]">
       <header className="bg-[#00186E] sticky top-0 z-10">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 bg-[#FFAD1D] rounded-lg flex items-center justify-center text-[#00186E] font-bold text-xl">
-              ∑
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 bg-[#FFAD1D] rounded-lg flex items-center justify-center text-[#00186E] font-bold text-xl">
+                ∑
+              </div>
+              <h1 className="text-xl font-semibold tracking-tight text-white font-serif-brand">MathVision</h1>
             </div>
-            <h1 className="text-xl font-semibold tracking-tight text-white font-serif-brand">MathVision</h1>
+
+            {/* Mode Tabs */}
+            <div className="hidden sm:flex items-center ml-4 bg-white/10 rounded-lg p-0.5">
+              <button
+                onClick={() => setAppMode('image-to-latex')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all font-sans-brand ${
+                  appMode === 'image-to-latex'
+                    ? 'bg-[#FFAD1D] text-[#00186E] shadow-sm'
+                    : 'text-white/60 hover:text-white'
+                }`}
+              >
+                <ImageIcon className="w-3.5 h-3.5" />
+                Image → LaTeX
+              </button>
+              <button
+                onClick={() => setAppMode('pdf-to-docx')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all font-sans-brand ${
+                  appMode === 'pdf-to-docx'
+                    ? 'bg-[#FFAD1D] text-[#00186E] shadow-sm'
+                    : 'text-white/60 hover:text-white'
+                }`}
+              >
+                <FileText className="w-3.5 h-3.5" />
+                PDF → DOCX
+              </button>
+            </div>
           </div>
           <div className="flex items-center gap-3">
-            <div className="text-sm text-white/60 font-medium font-sans-brand">
-              LaTeX & TikZ Assistant
-            </div>
+            {/* Mobile mode toggle */}
+            <button
+              onClick={() => setAppMode(appMode === 'image-to-latex' ? 'pdf-to-docx' : 'image-to-latex')}
+              className="sm:hidden flex items-center gap-1.5 text-xs text-white/60 hover:text-white border border-white/20 rounded-lg px-2.5 py-1.5 transition-colors font-sans-brand"
+            >
+              <ArrowRightLeft className="w-3.5 h-3.5" />
+              {appMode === 'image-to-latex' ? 'PDF → DOCX' : 'Image → LaTeX'}
+            </button>
             <button
               onClick={() => { setApiKey(''); setApiKeySubmitted(false); setResult(null); setError(null); }}
               className="text-xs text-white/50 hover:text-white border border-white/20 rounded-lg px-2.5 py-1.5 transition-colors font-sans-brand"
@@ -522,133 +559,137 @@ export default function App() {
         </div>
       </header>
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
-          {/* Left Column — Input */}
-          <div className="space-y-6">
-            {/* Upload Section */}
-            <div className="bg-white rounded-2xl shadow-sm border border-[#00186E]/10 overflow-hidden">
-              <div className="p-4 border-b border-[#00186E]/5 bg-[#00186E]/[0.02]">
-                <h2 className="font-medium text-[#00186E] flex items-center gap-2 font-sans-brand">
-                  <ImageIcon className="w-4 h-4 text-[#FFAD1D]" />
-                  Input Image
-                </h2>
-              </div>
+      {appMode === 'pdf-to-docx' ? (
+        <PdfToDocxConverter apiKey={apiKey} />
+      ) : (
+        <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
+            {/* Left Column — Input */}
+            <div className="space-y-6">
+              {/* Upload Section */}
+              <div className="bg-white rounded-2xl shadow-sm border border-[#00186E]/10 overflow-hidden">
+                <div className="p-4 border-b border-[#00186E]/5 bg-[#00186E]/[0.02]">
+                  <h2 className="font-medium text-[#00186E] flex items-center gap-2 font-sans-brand">
+                    <ImageIcon className="w-4 h-4 text-[#FFAD1D]" />
+                    Input Image
+                  </h2>
+                </div>
 
-              <div className="p-4">
-                {!imagePreview ? (
-                  <div
-                    {...getRootProps()}
-                    role="button"
-                    aria-label="Upload an image of math content"
-                    className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-colors duration-200 ${
-                      isDragActive ? 'border-[#FFAD1D] bg-[#FFAD1D]/10' : 'border-[#00186E]/20 hover:border-[#FFAD1D] hover:bg-[#FFAD1D]/5'
-                    }`}
-                  >
-                    <input {...getInputProps()} />
-                    <Upload className="w-10 h-10 text-[#00186E]/30 mx-auto mb-4" />
-                    <p className="text-sm font-medium text-[#00186E]/70 mb-1 font-sans-brand">
-                      Drag & drop an image here
-                    </p>
-                    <p className="text-xs text-[#00186E]/40 font-sans-brand">
-                      or click to select a file (PNG, JPG, WebP — max 20MB)
-                    </p>
-                  </div>
-                ) : (
-                  <div className="space-y-4">
-                    <div className="relative rounded-xl overflow-hidden border border-[#00186E]/10 bg-[#f8f7f4] group">
-                      <img
-                        src={imagePreview}
-                        alt="Uploaded math content"
-                        className="w-full h-auto max-h-[400px] object-contain"
-                      />
-                      <div className="absolute inset-0 bg-[#00186E]/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                        <button
-                          {...getRootProps()}
-                          className="bg-white text-[#00186E] px-4 py-2 rounded-lg text-sm font-medium shadow-sm hover:bg-[#f8f7f4] transition-colors font-sans-brand"
-                        >
-                          <input {...getInputProps()} />
-                          Replace Image
-                        </button>
-                      </div>
-                    </div>
-
-                    <button
-                      onClick={processImage}
-                      disabled={isProcessing}
-                      className="w-full bg-[#FFAD1D] hover:bg-[#e89c10] text-[#00186E] font-semibold py-3 px-4 rounded-xl shadow-sm transition-colors disabled:opacity-70 disabled:cursor-not-allowed flex items-center justify-center gap-2 font-sans-brand"
+                <div className="p-4">
+                  {!imagePreview ? (
+                    <div
+                      {...getRootProps()}
+                      role="button"
+                      aria-label="Upload an image of math content"
+                      className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-colors duration-200 ${
+                        isDragActive ? 'border-[#FFAD1D] bg-[#FFAD1D]/10' : 'border-[#00186E]/20 hover:border-[#FFAD1D] hover:bg-[#FFAD1D]/5'
+                      }`}
                     >
-                      {isProcessing ? (
-                        <>
-                          <Loader2 className="w-5 h-5 animate-spin" />
-                          Processing Image...
-                        </>
-                      ) : (
-                        <>
-                          Convert to LaTeX
-                        </>
-                      )}
-                    </button>
-                  </div>
-                )}
+                      <input {...getInputProps()} />
+                      <Upload className="w-10 h-10 text-[#00186E]/30 mx-auto mb-4" />
+                      <p className="text-sm font-medium text-[#00186E]/70 mb-1 font-sans-brand">
+                        Drag & drop an image here
+                      </p>
+                      <p className="text-xs text-[#00186E]/40 font-sans-brand">
+                        or click to select a file (PNG, JPG, WebP — max 20MB)
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      <div className="relative rounded-xl overflow-hidden border border-[#00186E]/10 bg-[#f8f7f4] group">
+                        <img
+                          src={imagePreview}
+                          alt="Uploaded math content"
+                          className="w-full h-auto max-h-[400px] object-contain"
+                        />
+                        <div className="absolute inset-0 bg-[#00186E]/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                          <button
+                            {...getRootProps()}
+                            className="bg-white text-[#00186E] px-4 py-2 rounded-lg text-sm font-medium shadow-sm hover:bg-[#f8f7f4] transition-colors font-sans-brand"
+                          >
+                            <input {...getInputProps()} />
+                            Replace Image
+                          </button>
+                        </div>
+                      </div>
+
+                      <button
+                        onClick={processImage}
+                        disabled={isProcessing}
+                        className="w-full bg-[#FFAD1D] hover:bg-[#e89c10] text-[#00186E] font-semibold py-3 px-4 rounded-xl shadow-sm transition-colors disabled:opacity-70 disabled:cursor-not-allowed flex items-center justify-center gap-2 font-sans-brand"
+                      >
+                        {isProcessing ? (
+                          <>
+                            <Loader2 className="w-5 h-5 animate-spin" />
+                            Processing Image...
+                          </>
+                        ) : (
+                          <>
+                            Convert to LaTeX
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Instructions Card */}
+              <div className="bg-[#B9CF7C]/20 rounded-2xl border border-[#B9CF7C]/40 p-5">
+                <h3 className="text-sm font-semibold text-[#00186E] mb-2 font-sans-brand">How it works</h3>
+                <ul className="text-sm text-[#00186E]/70 space-y-2 list-disc list-inside font-serif-brand">
+                  <li>Upload a photo or screenshot of math problems or geometric figures.</li>
+                  <li>The AI will generate compilable <strong>TikZ</strong> code for geometry.</li>
+                  <li>It will generate clean <strong>LaTeX</strong> for formulas (MathType compatible).</li>
+                  <li>Results are formatted exactly as shown, without solving.</li>
+                </ul>
               </div>
             </div>
 
-            {/* Instructions Card */}
-            <div className="bg-[#B9CF7C]/20 rounded-2xl border border-[#B9CF7C]/40 p-5">
-              <h3 className="text-sm font-semibold text-[#00186E] mb-2 font-sans-brand">How it works</h3>
-              <ul className="text-sm text-[#00186E]/70 space-y-2 list-disc list-inside font-serif-brand">
-                <li>Upload a photo or screenshot of math problems or geometric figures.</li>
-                <li>The AI will generate compilable <strong>TikZ</strong> code for geometry.</li>
-                <li>It will generate clean <strong>LaTeX</strong> for formulas (MathType compatible).</li>
-                <li>Results are formatted exactly as shown, without solving.</li>
-              </ul>
-            </div>
-          </div>
+            {/* Right Column — Output */}
+            <div className="lg:sticky lg:top-24">
+              <div className="bg-white rounded-2xl shadow-sm border border-[#00186E]/10 min-h-[400px] lg:min-h-[calc(100vh-8rem)] flex flex-col overflow-hidden">
+                <div className="p-4 border-b border-[#00186E]/5 bg-[#00186E]/[0.02] flex items-center justify-between">
+                  <h2 className="font-medium text-[#00186E] flex items-center gap-2 font-sans-brand">
+                    Output
+                  </h2>
+                </div>
 
-          {/* Right Column — Output */}
-          <div className="lg:sticky lg:top-24">
-            <div className="bg-white rounded-2xl shadow-sm border border-[#00186E]/10 min-h-[400px] lg:min-h-[calc(100vh-8rem)] flex flex-col overflow-hidden">
-              <div className="p-4 border-b border-[#00186E]/5 bg-[#00186E]/[0.02] flex items-center justify-between">
-                <h2 className="font-medium text-[#00186E] flex items-center gap-2 font-sans-brand">
-                  Output
-                </h2>
-              </div>
-
-              <div className="flex-1 p-0 overflow-y-auto">
-                {isProcessing ? (
-                  <div className="h-full flex flex-col items-center justify-center text-[#00186E]/40 space-y-4 p-8">
-                    <Loader2 className="w-10 h-10 animate-spin text-[#FFAD1D]" />
-                    <p className="text-sm font-medium animate-pulse font-sans-brand">Analyzing math content and generating LaTeX...</p>
-                  </div>
-                ) : error ? (
-                  <div className="p-6">
-                    <div className="bg-red-50 text-red-800 rounded-xl p-4 flex items-start gap-3 border border-red-100">
-                      <AlertCircle className="w-5 h-5 text-red-500 shrink-0 mt-0.5" />
-                      <div>
-                        <h3 className="font-medium mb-1 font-sans-brand">Error processing image</h3>
-                        <p className="text-sm text-red-700/90">{error}</p>
+                <div className="flex-1 p-0 overflow-y-auto">
+                  {isProcessing ? (
+                    <div className="h-full flex flex-col items-center justify-center text-[#00186E]/40 space-y-4 p-8">
+                      <Loader2 className="w-10 h-10 animate-spin text-[#FFAD1D]" />
+                      <p className="text-sm font-medium animate-pulse font-sans-brand">Analyzing math content and generating LaTeX...</p>
+                    </div>
+                  ) : error ? (
+                    <div className="p-6">
+                      <div className="bg-red-50 text-red-800 rounded-xl p-4 flex items-start gap-3 border border-red-100">
+                        <AlertCircle className="w-5 h-5 text-red-500 shrink-0 mt-0.5" />
+                        <div>
+                          <h3 className="font-medium mb-1 font-sans-brand">Error processing image</h3>
+                          <p className="text-sm text-red-700/90">{error}</p>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                ) : result ? (
-                  <div className="p-6">
-                    <ResultRenderer content={result} />
-                  </div>
-                ) : (
-                  <div className="h-full flex flex-col items-center justify-center text-[#00186E]/30 p-8 text-center">
-                    <div className="w-16 h-16 bg-[#00186E]/5 rounded-full flex items-center justify-center mb-4">
-                      <span className="text-2xl font-serif-brand italic text-[#00186E]/20">f(x)</span>
+                  ) : result ? (
+                    <div className="p-6">
+                      <ResultRenderer content={result} />
                     </div>
-                    <p className="text-sm font-medium text-[#00186E]/50 font-sans-brand">No output yet</p>
-                    <p className="text-xs text-[#00186E]/30 mt-1 max-w-xs font-sans-brand">Upload an image and click "Convert to LaTeX" to see the results here.</p>
-                  </div>
-                )}
+                  ) : (
+                    <div className="h-full flex flex-col items-center justify-center text-[#00186E]/30 p-8 text-center">
+                      <div className="w-16 h-16 bg-[#00186E]/5 rounded-full flex items-center justify-center mb-4">
+                        <span className="text-2xl font-serif-brand italic text-[#00186E]/20">f(x)</span>
+                      </div>
+                      <p className="text-sm font-medium text-[#00186E]/50 font-sans-brand">No output yet</p>
+                      <p className="text-xs text-[#00186E]/30 mt-1 max-w-xs font-sans-brand">Upload an image and click "Convert to LaTeX" to see the results here.</p>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           </div>
-        </div>
-      </main>
+        </main>
+      )}
     </div>
   );
 }

@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="logo.jpg" alt="MathVision Logo" width="160" />
+<img src="logo.jpg" alt="MathVision Logo" width="250" />
 
 # MathVision
 

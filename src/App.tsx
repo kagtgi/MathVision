@@ -534,21 +534,38 @@ function ResultRenderer({ content }: { content: string }) {
 }
 
 function TikzRenderer({ code }: { code: string }) {
-  const ref = useRef<HTMLDivElement>(null);
-  
+  const [height, setHeight] = useState(350);
+  const idRef = useRef(Math.random().toString(36).slice(2));
+
   useEffect(() => {
-    if (ref.current) {
-      ref.current.innerHTML = '';
-      const script = document.createElement('script');
-      script.type = 'text/tikz';
-      script.textContent = code;
-      ref.current.appendChild(script);
-    }
-  }, [code]);
+    const handler = (e: MessageEvent) => {
+      if (e.data?.tikzId === idRef.current && typeof e.data.height === 'number') {
+        setHeight(Math.max(e.data.height, 200));
+      }
+    };
+    window.addEventListener('message', handler);
+    return () => window.removeEventListener('message', handler);
+  }, []);
+
+  const escapedCode = code.replace(/<\/script/gi, '<\\/script');
+  const tikzId = idRef.current;
+
+  const srcDoc = `<!DOCTYPE html><html><head>
+<link rel="stylesheet" type="text/css" href="https://tikzjax.com/v1/fonts.css">
+<script src="https://tikzjax.com/v1/tikzjax.js"><\/script>
+<style>html,body{margin:0;padding:16px;background:white;display:flex;justify-content:center;align-items:start;overflow:hidden;}</style>
+</head><body>
+<script type="text/tikz">${escapedCode}<\/script>
+<script>new MutationObserver(function(m,o){if(document.querySelector('svg')){o.disconnect();setTimeout(function(){window.parent.postMessage({tikzId:'${tikzId}',height:document.documentElement.scrollHeight},'*')},300)}}).observe(document.body,{childList:true,subtree:true});<\/script>
+</body></html>`;
 
   return (
-    <div className="flex justify-center bg-white p-4 rounded-lg overflow-auto min-h-[200px] border border-[#00186E]/10">
-      <div ref={ref} />
+    <div className="flex justify-center bg-white p-4 rounded-lg overflow-hidden min-h-[200px] border border-[#00186E]/10">
+      <iframe
+        srcDoc={srcDoc}
+        style={{ border: 'none', width: '100%', height: `${height}px`, background: 'white' }}
+        title="TikZ Preview"
+      />
     </div>
   );
 }

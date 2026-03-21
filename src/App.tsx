@@ -95,9 +95,9 @@ Transcribe all mathematical content into clean LaTeX suitable for MathType, Over
 - Wrap ALL math content in $...$ — there is no other math environment
 - One $...$ per line for multi-line derivations:
 
-  $f(x) = x^2 + 2x + 1$
-  $f(x) = (x+1)^2$
-  $f'(x) = 2(x+1)$
+  $f\\left( x \\right) = x^2 + 2x + 1$
+  $f\\left( x \\right) = \\left( x+1 \\right)^2$
+  $\{f\}'\\left( x \\right) = 2\\left( x+1 \\right)$
 
 - For piecewise / systems, use $...$ containing a cases environment:
 
@@ -113,7 +113,17 @@ Transcribe all mathematical content into clean LaTeX suitable for MathType, Over
 ### Transcription rules
 - Reproduce exactly what is shown — do NOT simplify, factor, or solve
 - Preserve ALL exponents, subscripts, superscripts exactly as written
-- Preserve ALL parentheses, brackets, and braces; use \\left( \\right) for dynamic sizing around tall content (fractions, integrals, matrices)
+- ALWAYS use \\left and \\right for ALL brackets, parentheses, and braces — no exceptions:
+  - Parentheses: $\\left( ... \\right)$ — never use bare ( )
+  - Square brackets: $\\left[ ... \\right]$ — never use bare [ ]
+  - Curly braces: $\\left\\{ ... \\right\\}$ — never use bare \\{ \\}
+  - Examples: $\\left( x + 1 \\right)$, $\\left[ a, b \\right]$, $\\left\\{ 1, 2, 3 \\right\\}$
+- For derivatives with prime notation, always wrap the base in braces before the prime:
+  - Correct: $\{y\}'$, $\{f\}'(x)$, $\{y\}''$, $\{f\}''(x)$
+  - Wrong: $y'$, $f'(x)$, $y''$
+- For degree symbols, always use {}^\\circ with braces before it:
+  - Correct: $30{}^\\circ$, $\\widehat{BAC} = 30{}^\\circ$
+  - Wrong: $30°$, $30^\\circ$, $30^{\\circ}$
 - Standard commands: \\frac{a}{b}, \\int_{a}^{b} f(x)\\,dx, \\sum_{i=1}^{n}, \\lim_{x \\to \\infty}, \\sqrt{...}, \\sqrt[n]{...}, \\vec{v}, \\mathbf{v}, \\alpha \\beta \\theta \\pi \\Delta \\Sigma (etc.)
 - For piecewise functions or systems of equations use cases:
     \\begin{cases}
@@ -126,6 +136,9 @@ Output format:
 % Paste directly into MathType or any LaTeX editor
 
 $x^2 + y^2 = r^2$
+$\\left( x - a \\right)^2 + \\left( y - b \\right)^2 = r^2$
+$\\alpha = 90{}^\\circ$
+$\{y\}' = 2x$
 \`\`\`
 
 ---

@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef } from 'react';
 import { GoogleGenAI } from '@google/genai';
-import * as pdfjsLib from 'pdfjs-dist/build/pdf.mjs';
+import * as pdfjsLib from 'pdfjs-dist';
 import {
   Document as DocxDocument,
   Packer,

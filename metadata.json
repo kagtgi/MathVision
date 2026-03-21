@@ -1,5 +1,5 @@
 {
-  "name": "MathTeacherVision",
+  "name": "MathVision",
   "description": "An expert assistant for mathematics teachers to convert handwritten or printed math content from images into clean, ready-to-use LaTeX and TikZ.",
   "requestFramePermissions": []
 }

@@ -6,11 +6,60 @@ const RETINA_SCALE = 2;
 const EQUATION_FONT_SIZE_PX = 18;
 const EQUATION_PADDING_PX = 8;
 const EQUATION_PADDING_SIDE_PX = 12;
-const CSS_SETTLE_DELAY_MS = 50;
 const TIKZ_RENDER_TIMEOUT_MS = 30000;
 const MIN_TIKZ_DIMENSION = 100;
 
 const KATEX_CSS_URL = 'https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css';
+
+// ─── Reusable canvas pool ─────────────────────────────────────────────────────
+
+let _reusableCanvas: HTMLCanvasElement | null = null;
+
+function getReusableCanvas(width: number, height: number): { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D } {
+  if (!_reusableCanvas) {
+    _reusableCanvas = document.createElement('canvas');
+  }
+  _reusableCanvas.width = width;
+  _reusableCanvas.height = height;
+  const ctx = _reusableCanvas.getContext('2d', { willReadFrequently: false })!;
+  // Clear any previous content to prevent ghosting artifacts
+  ctx.clearRect(0, 0, width, height);
+  return { canvas: _reusableCanvas, ctx };
+}
+
+// ─── KaTeX CSS preload ────────────────────────────────────────────────────────
+
+let _katexCssText: string | null = null;
+let _katexCssPromise: Promise<string> | null = null;
+
+function getKatexCss(): Promise<string> {
+  if (_katexCssText) return Promise.resolve(_katexCssText);
+  if (!_katexCssPromise) {
+    _katexCssPromise = fetch(KATEX_CSS_URL)
+      .then((r) => r.text())
+      .then((css) => {
+        // Rewrite relative font URLs to absolute
+        _katexCssText = css.replace(/url\(fonts\//g, `url(https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/fonts/`);
+        return _katexCssText;
+      })
+      .catch(() => ''); // Fallback: empty CSS, will still use <link> tag
+  }
+  return _katexCssPromise;
+}
+
+// Kick off CSS preload immediately on module load
+getKatexCss();
+
+// ─── Wait for next frame (replaces fixed 50ms delay) ──────────────────────────
+
+function waitForLayout(): Promise<void> {
+  return new Promise((resolve) => {
+    requestAnimationFrame(() => {
+      // Double-rAF ensures layout is complete
+      requestAnimationFrame(() => resolve());
+    });
+  });
+}
 
 /**
  * Render a LaTeX equation string to a PNG image (as Uint8Array + dimensions).
@@ -24,6 +73,9 @@ export async function latexToImage(
   latex: string,
   displayMode = true,
 ): Promise<{ bytes: Uint8Array; width: number; height: number }> {
+  // Preload CSS in parallel with KaTeX rendering
+  const cssPromise = getKatexCss();
+
   // Create an off-screen container and render LaTeX via KaTeX DOM API (safe — no innerHTML)
   const container = document.createElement('div');
   container.style.position = 'absolute';
@@ -45,8 +97,8 @@ export async function latexToImage(
 
   document.body.appendChild(container);
 
-  // Allow CSS to settle for accurate measurement
-  await new Promise((r) => setTimeout(r, CSS_SETTLE_DELAY_MS));
+  // Wait for layout to settle (uses rAF instead of fixed 50ms timeout)
+  await waitForLayout();
 
   const rect = container.getBoundingClientRect();
   const width = Math.ceil(rect.width * RETINA_SCALE);
@@ -56,13 +108,19 @@ export async function latexToImage(
   const html = container.innerHTML;
   document.body.removeChild(container);
 
+  // Use inlined CSS when available for faster SVG rendering (no external fetch per equation)
+  const katexCss = await cssPromise;
+  const cssTag = katexCss
+    ? `<style>${katexCss}</style>`
+    : `<link rel="stylesheet" href="${KATEX_CSS_URL}" />`;
+
   // Build an SVG with foreignObject containing the KaTeX HTML
   const svgContent = `
     <svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">
       <foreignObject width="100%" height="100%">
         <div xmlns="http://www.w3.org/1999/xhtml"
              style="font-size:${EQUATION_FONT_SIZE_PX * RETINA_SCALE}px; line-height:1.4; padding:${EQUATION_PADDING_PX * RETINA_SCALE}px ${EQUATION_PADDING_SIDE_PX * RETINA_SCALE}px; color:#000;">
-          <link rel="stylesheet" href="${KATEX_CSS_URL}" />
+          ${cssTag}
           ${html}
         </div>
       </foreignObject>
@@ -77,10 +135,7 @@ export async function latexToImage(
 
   const bytes = await new Promise<Uint8Array>((resolve, reject) => {
     img.onload = () => {
-      const canvas = document.createElement('canvas');
-      canvas.width = width;
-      canvas.height = height;
-      const ctx = canvas.getContext('2d')!;
+      const { canvas, ctx } = getReusableCanvas(width, height);
       ctx.fillStyle = '#ffffff';
       ctx.fillRect(0, 0, width, height);
       ctx.drawImage(img, 0, 0, width, height);
@@ -101,6 +156,7 @@ export async function latexToImage(
       URL.revokeObjectURL(svgUrl);
       reject(new Error('Failed to load SVG image'));
     };
+    img.src = svgUrl;
   });
 
   return { bytes, width, height };
@@ -152,10 +208,7 @@ export async function tikzToImage(
     const result = await new Promise<{ bytes: Uint8Array; width: number; height: number } | null>(
       (resolve) => {
         img.onload = () => {
-          const canvas = document.createElement('canvas');
-          canvas.width = width;
-          canvas.height = height;
-          const ctx = canvas.getContext('2d')!;
+          const { canvas, ctx } = getReusableCanvas(width, height);
           ctx.fillStyle = '#ffffff';
           ctx.fillRect(0, 0, width, height);
           ctx.drawImage(img, 0, 0, width, height);

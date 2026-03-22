@@ -86,52 +86,48 @@ export default function App() {
     setResult(null);
     setError(null);
 
-    const reader = new FileReader();
-    reader.onerror = () => {
-      setError("Failed to read the image file. Please try again.");
-    };
-    reader.onloadend = () => {
-      if (typeof reader.result !== 'string') {
-        setError("Failed to read the image file. Please try again.");
-        return;
-      }
-      const img = new window.Image();
-      img.onerror = () => {
-        setError("The file could not be loaded as an image. Please use a PNG, JPG, or WebP file.");
-      };
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        const MAX_WIDTH = 1024;
-        const MAX_HEIGHT = 1024;
-        let width = img.width;
-        let height = img.height;
+    // Use createImageBitmap for faster, off-main-thread image decoding
+    const MAX_DIM = 1024;
+
+    createImageBitmap(file)
+      .then((bitmap) => {
+        let width = bitmap.width;
+        let height = bitmap.height;
 
         if (width > height) {
-          if (width > MAX_WIDTH) {
-            height *= MAX_WIDTH / width;
-            width = MAX_WIDTH;
+          if (width > MAX_DIM) {
+            height *= MAX_DIM / width;
+            width = MAX_DIM;
           }
         } else {
-          if (height > MAX_HEIGHT) {
-            width *= MAX_HEIGHT / height;
-            height = MAX_HEIGHT;
+          if (height > MAX_DIM) {
+            width *= MAX_DIM / height;
+            height = MAX_DIM;
           }
         }
 
+        const canvas = document.createElement('canvas');
         canvas.width = width;
         canvas.height = height;
         const ctx = canvas.getContext('2d');
         if (ctx) {
-          ctx.drawImage(img, 0, 0, width, height);
+          ctx.drawImage(bitmap, 0, 0, width, height);
+          bitmap.close(); // Free memory
           const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
           setImagePreview(dataUrl);
         } else {
-          setImagePreview(reader.result as string);
+          // Fallback: read as data URL directly
+          bitmap.close();
+          const reader = new FileReader();
+          reader.onloadend = () => {
+            if (typeof reader.result === 'string') setImagePreview(reader.result);
+          };
+          reader.readAsDataURL(file);
         }
-      };
-      img.src = reader.result;
-    };
-    reader.readAsDataURL(file);
+      })
+      .catch(() => {
+        setError("The file could not be loaded as an image. Please use a PNG, JPG, or WebP file.");
+      });
   }, []);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
@@ -512,18 +508,19 @@ function ResultRenderer({ content }: { content: string }) {
         remarkPlugins={[remarkGfm, remarkMath]}
         rehypePlugins={[rehypeKatex]}
         components={{
-          code({ node, inline, className, children, ...props }: any) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          code(props: any) {
+            const { className, children } = props;
             const match = /language-(\w+)/.exec(className || '');
-            const isCodeBlock = !inline && match;
-            
-            if (isCodeBlock) {
+
+            if (match) {
               return (
                 <CodeBlock language={match[1]} code={String(children).replace(/\n$/, '')} />
               );
             }
-            
+
             return (
-              <code className="bg-[#00186E]/5 text-[#00186E] px-1.5 py-0.5 rounded-md font-mono text-xs" {...props}>
+              <code className="bg-[#00186E]/5 text-[#00186E] px-1.5 py-0.5 rounded-md font-mono text-xs">
                 {children}
               </code>
             );
@@ -740,19 +737,39 @@ function CodeBlock({ language, code }: { language: string, code: string }) {
   );
 }
 
+const TIKZ_IFRAME_TIMEOUT_MS = 30000; // Max 30s for TikZ rendering in iframe
+
 function TikzRendererWithRef({ code, onImageReady }: { code: string, onImageReady?: (dataUrl: string | null) => void }) {
   const [pngDataUrl, setPngDataUrl] = useState<string | null>(null);
   const [isRendering, setIsRendering] = useState(true);
+  const [renderError, setRenderError] = useState(false);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const idRef = useRef(Math.random().toString(36).slice(2));
 
   useEffect(() => {
+    let settled = false;
+
+    // Timeout guard: if TikZJax never renders, fail gracefully
+    const timeoutId = setTimeout(() => {
+      if (!settled) {
+        settled = true;
+        setIsRendering(false);
+        setRenderError(true);
+        onImageReady?.(null);
+      }
+    }, TIKZ_IFRAME_TIMEOUT_MS);
+
     const handler = (e: MessageEvent) => {
       if (e.data?.tikzId !== idRef.current) return;
-      const iframe = iframeRef.current;
-      if (!iframe) return;
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeoutId);
 
-      setTimeout(() => {
+      const iframe = iframeRef.current;
+      if (!iframe) { setIsRendering(false); onImageReady?.(null); return; }
+
+      // Use rAF instead of fixed delay for faster rendering
+      requestAnimationFrame(() => {
         const svgEl = iframe.contentDocument?.querySelector('svg');
         if (!svgEl) { setIsRendering(false); onImageReady?.(null); return; }
 
@@ -781,10 +798,13 @@ function TikzRendererWithRef({ code, onImageReady }: { code: string, onImageRead
         };
         img.onerror = () => { URL.revokeObjectURL(url); setIsRendering(false); onImageReady?.(null); };
         img.src = url;
-      }, 500);
+      });
     };
     window.addEventListener('message', handler);
-    return () => window.removeEventListener('message', handler);
+    return () => {
+      window.removeEventListener('message', handler);
+      clearTimeout(timeoutId);
+    };
   }, [onImageReady]);
 
   const tikzId = idRef.current;
@@ -795,7 +815,7 @@ function TikzRendererWithRef({ code, onImageReady }: { code: string, onImageRead
 <style>html,body{margin:0;padding:16px;background:white;display:flex;justify-content:center;align-items:start;overflow:hidden;}</style>
 </head><body>
 <script type="text/tikz">${escapedCode}<\/script>
-<script>new MutationObserver(function(m,o){if(document.querySelector('svg')){o.disconnect();setTimeout(function(){window.parent.postMessage({tikzId:'${tikzId}',height:document.documentElement.scrollHeight},'*')},300)}}).observe(document.body,{childList:true,subtree:true});<\/script>
+<script>new MutationObserver(function(m,o){if(document.querySelector('svg')){o.disconnect();requestAnimationFrame(function(){window.parent.postMessage({tikzId:'${tikzId}',height:document.documentElement.scrollHeight},'*')})}}).observe(document.body,{childList:true,subtree:true});<\/script>
 </body></html>`;
 
   return (
@@ -816,7 +836,9 @@ function TikzRendererWithRef({ code, onImageReady }: { code: string, onImageRead
         <img src={pngDataUrl} alt="TikZ figure" className="max-w-full h-auto" />
       ) : (
         <div className="flex items-center justify-center w-full h-48 text-red-400">
-          <span className="text-sm font-sans-brand">Failed to render figure</span>
+          <span className="text-sm font-sans-brand">
+            {renderError ? 'Rendering timed out — TikZ code may be invalid' : 'Failed to render figure'}
+          </span>
         </div>
       )}
     </div>

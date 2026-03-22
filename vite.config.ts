@@ -20,6 +20,8 @@ export default defineConfig(() => {
           manualChunks: {
             pdfjs: ['pdfjs-dist'],
             docx: ['docx'],
+            katex: ['katex'],
+            markdown: ['react-markdown', 'remark-math', 'rehype-katex', 'remark-gfm'],
           },
         },
       },

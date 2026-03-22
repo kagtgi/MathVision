@@ -47,6 +47,7 @@ const MAX_PDF_SIZE_BYTES = 50 * 1024 * 1024; // 50 MB
 const MAX_PDF_SIZE_MB = 50;
 const PDF_RENDER_SCALE = 2;
 const JPEG_QUALITY = 0.85;
+const JPEG_QUALITY_API = 0.7; // Lower quality for Gemini API (faster upload, same accuracy)
 const DOCX_MAX_IMAGE_WIDTH = 500; // points (~6.9 inches)
 const GEMINI_TEMPERATURE = 0.1;
 const API_TIMEOUT_MS = 120_000; // 120 seconds per page (pro model is slower)
@@ -534,6 +535,18 @@ const DocxPageElement = memo(function DocxPageElement({ element }: { element: Do
 
 // ─── PDF Page Canvas Display ─────────────────────────────────────────────────
 
+// Cache canvas-to-dataURL conversions to avoid expensive re-encoding
+const _canvasDataUrlCache = new WeakMap<HTMLCanvasElement, string>();
+
+function getCachedCanvasDataUrl(canvas: HTMLCanvasElement): string {
+  let url = _canvasDataUrlCache.get(canvas);
+  if (!url) {
+    url = canvas.toDataURL('image/jpeg', 0.85); // JPEG is ~5x faster to encode than PNG
+    _canvasDataUrlCache.set(canvas, url);
+  }
+  return url;
+}
+
 const PdfPageCanvas = memo(function PdfPageCanvas({ canvas }: { canvas: HTMLCanvasElement }) {
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -541,9 +554,9 @@ const PdfPageCanvas = memo(function PdfPageCanvas({ canvas }: { canvas: HTMLCanv
     const container = containerRef.current;
     if (!container || !canvas) return;
 
-    // Create an img from the canvas data for clean display
+    // Create an img from cached canvas data for clean display
     const img = document.createElement('img');
-    img.src = canvas.toDataURL('image/png');
+    img.src = getCachedCanvasDataUrl(canvas);
     img.style.width = '100%';
     img.style.height = 'auto';
     img.style.display = 'block';
@@ -824,34 +837,51 @@ export default function PdfToDocxConverter({ apiKey }: { apiKey: string }) {
       const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
       const totalPages = pdf.numPages;
 
-      setProgress({ current: 0, total: totalPages, status: 'Analyzing pages...' });
+      setProgress({ current: 0, total: totalPages, status: 'Pre-rendering pages...' });
 
+      // ── Phase 1: Pre-render all PDF pages in parallel for faster pipeline ──
+      const canvasMap = new Map<number, HTMLCanvasElement>();
+      const base64Map = new Map<number, string>();
+
+      // Render pages in small batches to avoid memory pressure
+      const RENDER_BATCH_SIZE = 4;
+      for (let batch = 0; batch < totalPages; batch += RENDER_BATCH_SIZE) {
+        if (controller.signal.aborted) return;
+        const batchEnd = Math.min(batch + RENDER_BATCH_SIZE, totalPages);
+        const batchPromises = [];
+        for (let p = batch + 1; p <= batchEnd; p++) {
+          batchPromises.push(
+            renderPdfPage(pdf, p, PDF_RENDER_SCALE).then((canvas) => {
+              canvasMap.set(p, canvas);
+              pageCanvasesRef.current.set(p, canvas);
+              // Pre-encode to base64 for API (lower quality = smaller payload = faster upload)
+              const dataUrl = canvasToBase64(canvas, JPEG_QUALITY_API);
+              base64Map.set(p, dataUrl.split(',')[1]);
+            }),
+          );
+        }
+        await Promise.all(batchPromises);
+        setProgress({
+          current: batchEnd,
+          total: totalPages,
+          status: `Pre-rendered ${batchEnd} of ${totalPages} pages...`,
+        });
+      }
+
+      // ── Phase 2: Analyze pages with API (rendering is already done) ──
       const allPages: PageContent[] = [];
 
       for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
-        // Check if user cancelled
         if (controller.signal.aborted) return;
 
-        setProgress({
-          current: pageNum,
-          total: totalPages,
-          status: `Rendering page ${pageNum} of ${totalPages}...`,
-        });
+        const canvas = canvasMap.get(pageNum)!;
+        const base64Data = base64Map.get(pageNum)!;
 
-        // Render page to canvas
-        const canvas = await renderPdfPage(pdf, pageNum, PDF_RENDER_SCALE);
-        pageCanvasesRef.current.set(pageNum, canvas);
-
-        if (controller.signal.aborted) return;
-
-        // Convert to base64 for Gemini
         setProgress({
           current: pageNum,
           total: totalPages,
           status: `Analyzing page ${pageNum} of ${totalPages}...`,
         });
-        const imageDataUrl = canvasToBase64(canvas, JPEG_QUALITY);
-        const base64Data = imageDataUrl.split(',')[1];
 
         // Send to Gemini for analysis with timeout
         const apiCall = ai.models.generateContent({
@@ -989,19 +1019,30 @@ export default function PdfToDocxConverter({ apiKey }: { apiKey: string }) {
           }
         }
 
-        // Process equation elements
-        for (const el of elements) {
+        // Process equation elements in parallel for faster rendering
+        const equationElements = elements.filter((el) => el.type === 'equation' && el.latex);
+        if (equationElements.length > 0) {
           if (controller.signal.aborted) return;
+          setProgress({
+            current: pageNum,
+            total: totalPages,
+            status: `Page ${pageNum}: rendering ${equationElements.length} equation(s)...`,
+          });
 
-          if (el.type === 'equation' && el.latex) {
-            try {
-              const eqImg = await latexToImage(el.latex, true);
-              el.equationImage = eqImg;
-            } catch {
-              // Equation image rendering failed — will fall back to OMML
+          const eqResults = await Promise.allSettled(
+            equationElements.map((el) => latexToImage(el.latex!, true)),
+          );
+          for (let i = 0; i < equationElements.length; i++) {
+            const result = eqResults[i];
+            if (result.status === 'fulfilled') {
+              equationElements[i].equationImage = result.value;
             }
+            // Failed equations fall back to OMML automatically
           }
         }
+
+        // Free the pre-encoded base64 to reduce memory
+        base64Map.delete(pageNum);
 
         allPages.push({
           pageNumber: pageNum,
@@ -1274,11 +1315,11 @@ export default function PdfToDocxConverter({ apiKey }: { apiKey: string }) {
               <li>Upload a PDF file with text, equations, tables, and images.</li>
               <li>
                 AI analyzes each page to detect structure and convert equations to{' '}
-                <strong>LaTeX</strong>, quality as image to LaTeX.
+                <strong>LaTeX</strong> with image-to-LaTeX quality.
               </li>
               <li>
-                Equations are converted to LaTeX equation as image to LaTeX{' '}
-                <code className="text-xs bg-[#00186E]/5 px-1 rounded">$...$</code> and put in Word.
+                Equations are rendered as high-fidelity images in{' '}
+                <code className="text-xs bg-[#00186E]/5 px-1 rounded">$...$</code> format and embedded in Word.
               </li>
               <li>
                 Tables are preserved as <strong>Word tables</strong> with LaTeX math or text in each cell.

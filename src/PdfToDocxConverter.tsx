@@ -534,6 +534,18 @@ const DocxPageElement = memo(function DocxPageElement({ element }: { element: Do
 
 // ─── PDF Page Canvas Display ─────────────────────────────────────────────────
 
+// Cache canvas-to-dataURL conversions to avoid expensive re-encoding
+const _canvasDataUrlCache = new WeakMap<HTMLCanvasElement, string>();
+
+function getCachedCanvasDataUrl(canvas: HTMLCanvasElement): string {
+  let url = _canvasDataUrlCache.get(canvas);
+  if (!url) {
+    url = canvas.toDataURL('image/jpeg', 0.85); // JPEG is ~5x faster to encode than PNG
+    _canvasDataUrlCache.set(canvas, url);
+  }
+  return url;
+}
+
 const PdfPageCanvas = memo(function PdfPageCanvas({ canvas }: { canvas: HTMLCanvasElement }) {
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -541,9 +553,9 @@ const PdfPageCanvas = memo(function PdfPageCanvas({ canvas }: { canvas: HTMLCanv
     const container = containerRef.current;
     if (!container || !canvas) return;
 
-    // Create an img from the canvas data for clean display
+    // Create an img from cached canvas data for clean display
     const img = document.createElement('img');
-    img.src = canvas.toDataURL('image/png');
+    img.src = getCachedCanvasDataUrl(canvas);
     img.style.width = '100%';
     img.style.height = 'auto';
     img.style.display = 'block';
@@ -989,17 +1001,25 @@ export default function PdfToDocxConverter({ apiKey }: { apiKey: string }) {
           }
         }
 
-        // Process equation elements
-        for (const el of elements) {
+        // Process equation elements in parallel for faster rendering
+        const equationElements = elements.filter((el) => el.type === 'equation' && el.latex);
+        if (equationElements.length > 0) {
           if (controller.signal.aborted) return;
+          setProgress({
+            current: pageNum,
+            total: totalPages,
+            status: `Page ${pageNum}: rendering ${equationElements.length} equation(s)...`,
+          });
 
-          if (el.type === 'equation' && el.latex) {
-            try {
-              const eqImg = await latexToImage(el.latex, true);
-              el.equationImage = eqImg;
-            } catch {
-              // Equation image rendering failed — will fall back to OMML
+          const eqResults = await Promise.allSettled(
+            equationElements.map((el) => latexToImage(el.latex!, true)),
+          );
+          for (let i = 0; i < equationElements.length; i++) {
+            const result = eqResults[i];
+            if (result.status === 'fulfilled') {
+              equationElements[i].equationImage = result.value;
             }
+            // Failed equations fall back to OMML automatically
           }
         }
 

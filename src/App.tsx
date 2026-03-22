@@ -86,52 +86,48 @@ export default function App() {
     setResult(null);
     setError(null);
 
-    const reader = new FileReader();
-    reader.onerror = () => {
-      setError("Failed to read the image file. Please try again.");
-    };
-    reader.onloadend = () => {
-      if (typeof reader.result !== 'string') {
-        setError("Failed to read the image file. Please try again.");
-        return;
-      }
-      const img = new window.Image();
-      img.onerror = () => {
-        setError("The file could not be loaded as an image. Please use a PNG, JPG, or WebP file.");
-      };
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        const MAX_WIDTH = 1024;
-        const MAX_HEIGHT = 1024;
-        let width = img.width;
-        let height = img.height;
+    // Use createImageBitmap for faster, off-main-thread image decoding
+    const MAX_DIM = 1024;
+
+    createImageBitmap(file)
+      .then((bitmap) => {
+        let width = bitmap.width;
+        let height = bitmap.height;
 
         if (width > height) {
-          if (width > MAX_WIDTH) {
-            height *= MAX_WIDTH / width;
-            width = MAX_WIDTH;
+          if (width > MAX_DIM) {
+            height *= MAX_DIM / width;
+            width = MAX_DIM;
           }
         } else {
-          if (height > MAX_HEIGHT) {
-            width *= MAX_HEIGHT / height;
-            height = MAX_HEIGHT;
+          if (height > MAX_DIM) {
+            width *= MAX_DIM / height;
+            height = MAX_DIM;
           }
         }
 
+        const canvas = document.createElement('canvas');
         canvas.width = width;
         canvas.height = height;
         const ctx = canvas.getContext('2d');
         if (ctx) {
-          ctx.drawImage(img, 0, 0, width, height);
+          ctx.drawImage(bitmap, 0, 0, width, height);
+          bitmap.close(); // Free memory
           const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
           setImagePreview(dataUrl);
         } else {
-          setImagePreview(reader.result as string);
+          // Fallback: read as data URL directly
+          bitmap.close();
+          const reader = new FileReader();
+          reader.onloadend = () => {
+            if (typeof reader.result === 'string') setImagePreview(reader.result);
+          };
+          reader.readAsDataURL(file);
         }
-      };
-      img.src = reader.result;
-    };
-    reader.readAsDataURL(file);
+      })
+      .catch(() => {
+        setError("The file could not be loaded as an image. Please use a PNG, JPG, or WebP file.");
+      });
   }, []);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
@@ -752,7 +748,8 @@ function TikzRendererWithRef({ code, onImageReady }: { code: string, onImageRead
       const iframe = iframeRef.current;
       if (!iframe) return;
 
-      setTimeout(() => {
+      // Use rAF instead of fixed 500ms delay for faster rendering
+      requestAnimationFrame(() => {
         const svgEl = iframe.contentDocument?.querySelector('svg');
         if (!svgEl) { setIsRendering(false); onImageReady?.(null); return; }
 
@@ -781,7 +778,7 @@ function TikzRendererWithRef({ code, onImageReady }: { code: string, onImageRead
         };
         img.onerror = () => { URL.revokeObjectURL(url); setIsRendering(false); onImageReady?.(null); };
         img.src = url;
-      }, 500);
+      });
     };
     window.addEventListener('message', handler);
     return () => window.removeEventListener('message', handler);
@@ -795,7 +792,7 @@ function TikzRendererWithRef({ code, onImageReady }: { code: string, onImageRead
 <style>html,body{margin:0;padding:16px;background:white;display:flex;justify-content:center;align-items:start;overflow:hidden;}</style>
 </head><body>
 <script type="text/tikz">${escapedCode}<\/script>
-<script>new MutationObserver(function(m,o){if(document.querySelector('svg')){o.disconnect();setTimeout(function(){window.parent.postMessage({tikzId:'${tikzId}',height:document.documentElement.scrollHeight},'*')},300)}}).observe(document.body,{childList:true,subtree:true});<\/script>
+<script>new MutationObserver(function(m,o){if(document.querySelector('svg')){o.disconnect();requestAnimationFrame(function(){window.parent.postMessage({tikzId:'${tikzId}',height:document.documentElement.scrollHeight},'*')})}}).observe(document.body,{childList:true,subtree:true});<\/script>
 </body></html>`;
 
   return (

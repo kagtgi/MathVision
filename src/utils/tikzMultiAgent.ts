@@ -15,7 +15,7 @@ import { GoogleGenAI } from '@google/genai';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
-const TIKZ_MODEL = 'gemini-2.5-pro-preview-06-05';
+const TIKZ_MODEL = 'gemini-pro-latest';
 const ANALYSIS_TEMPERATURE = 0.1;
 const GENERATION_TEMPERATURE = 0.4; // moderate creativity for diversity across generators
 const JUDGE_TEMPERATURE = 0.1;

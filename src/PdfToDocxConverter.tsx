@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, memo } from 'react';
+import { useState, useCallback, useRef, useEffect, memo } from 'react';
 import { GoogleGenAI } from '@google/genai';
 import * as pdfjsLib from 'pdfjs-dist';
 import {
@@ -38,7 +38,7 @@ import rehypeKatex from 'rehype-katex';
 import remarkGfm from 'remark-gfm';
 import { latexToMathChildren, parseTextWithMath } from './utils/latexToDocxMath';
 import { latexToImage, tikzToImage } from './utils/latexToImage';
-import { generateTikzMultiAgent } from './utils/tikzMultiAgent';
+import { generateTikzMultiAgent, generateTikzSingleAgent } from './utils/tikzMultiAgent';
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
@@ -47,7 +47,7 @@ const MAX_PDF_SIZE_MB = 50;
 const PDF_RENDER_SCALE = 2;
 const JPEG_QUALITY = 0.85;
 const DOCX_MAX_IMAGE_WIDTH = 500; // points (~6.9 inches)
-const GEMINI_MODEL = 'gemini-2.5-pro-preview-06-05';
+const GEMINI_MODEL = 'gemini-pro-latest';
 const GEMINI_TEMPERATURE = 0.1;
 const API_TIMEOUT_MS = 120_000; // 120 seconds per page (pro model is slower)
 
@@ -321,18 +321,8 @@ function buildDocx(pages: PageContent[], fileName: string): DocxDocument {
         }
 
         case 'image': {
-          // Prefer TikZ-compiled image over cropped image for diagrams
-          const imgSource = el.tikzImage
-            ? el.tikzImage
-            : el.imageData && el.bbox && page.pageCanvas
-              ? (() => {
-                  try {
-                    return cropImageFromCanvas(page.pageCanvas, el.bbox);
-                  } catch {
-                    return null;
-                  }
-                })()
-              : null;
+          // Use TikZ-compiled image — never fall back to cropped screenshots
+          const imgSource = el.tikzImage ?? null;
 
           if (imgSource) {
             const { bytes, width, height } = imgSource;
@@ -365,11 +355,14 @@ function buildDocx(pages: PageContent[], fileName: string): DocxDocument {
                 })
               );
             }
-          } else if (el.caption) {
+          } else {
+            // TikZ generation failed — insert placeholder with caption/tikz code reference
+            const label = el.caption ? `[Figure: ${el.caption}]` : '[Figure — TikZ generation failed]';
             children.push(
               new Paragraph({
-                children: [new TextRun({ text: `[Image: ${el.caption}]`, italics: true })],
-                spacing: { after: 120 },
+                children: [new TextRun({ text: label, italics: true })],
+                alignment: AlignmentType.CENTER,
+                spacing: { before: 120, after: 120 },
               })
             );
           }
@@ -541,16 +534,42 @@ const DocxPageElement = memo(function DocxPageElement({ element }: { element: Do
   }
 });
 
-// ─── Claude-style Document Viewer ───────────────────────────────────────────
+// ─── PDF Page Canvas Display ─────────────────────────────────────────────────
+
+const PdfPageCanvas = memo(function PdfPageCanvas({ canvas }: { canvas: HTMLCanvasElement }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container || !canvas) return;
+
+    // Create an img from the canvas data for clean display
+    const img = document.createElement('img');
+    img.src = canvas.toDataURL('image/png');
+    img.style.width = '100%';
+    img.style.height = 'auto';
+    img.style.display = 'block';
+    img.alt = 'PDF page';
+
+    container.innerHTML = '';
+    container.appendChild(img);
+  }, [canvas]);
+
+  return <div ref={containerRef} />;
+});
+
+// ─── Side-by-Side Document Viewer (PDF input | DOCX output) ─────────────────
 
 function DocxViewer({
   pages,
+  pageCanvases,
   fileName,
   onDownload,
   isGenerating,
   onClose,
 }: {
   pages: PageContent[];
+  pageCanvases: Map<number, HTMLCanvasElement>;
   fileName: string;
   onDownload: () => void;
   isGenerating: boolean;
@@ -562,7 +581,6 @@ function DocxViewer({
   const totalElements = pages.reduce((acc, p) => acc + p.elements.length, 0);
 
   const handleCopyText = async () => {
-    // Extract all text content for clipboard
     const textParts: string[] = [];
     for (const page of pages) {
       for (const el of page.elements) {
@@ -660,47 +678,92 @@ function DocxViewer({
         </div>
       </div>
 
-      {/* ─── Document body — scrollable area with paper pages ─── */}
-      <div className="flex-1 overflow-auto py-8 px-4">
-        <div
-          className="mx-auto flex flex-col items-center gap-8"
-          style={{ transform: `scale(${zoom / 100})`, transformOrigin: 'top center' }}
-        >
-          {pages.map((page, pageIdx) => (
+      {/* ─── Side-by-side body ─── */}
+      <div className="flex-1 flex min-h-0">
+        {/* ─── LEFT: PDF Input ─── */}
+        <div className="w-1/2 flex flex-col border-r border-[#3a3a3a]">
+          <div className="px-4 py-2 bg-[#252525] border-b border-[#3a3a3a] shrink-0">
+            <h4 className="text-xs font-medium text-gray-400 uppercase tracking-wider">PDF Input</h4>
+          </div>
+          <div className="flex-1 overflow-auto py-6 px-4 bg-[#333]">
             <div
-              key={pageIdx}
-              className="bg-white shadow-[0_2px_8px_rgba(0,0,0,0.3)] relative"
-              style={{
-                width: '8.5in',
-                minHeight: '11in',
-                padding: '1in',
-                boxSizing: 'border-box',
-              }}
+              className="mx-auto flex flex-col items-center gap-6"
+              style={{ transform: `scale(${zoom / 100})`, transformOrigin: 'top center' }}
             >
-              {/* Page number label */}
-              <div
-                className="absolute top-3 right-4 text-[8pt] text-gray-300 select-none"
-                style={{ fontFamily: '"Calibri", sans-serif' }}
-              >
-                Page {page.pageNumber}
-              </div>
-
-              {/* Page content */}
-              <div className="relative">
-                {page.elements.map((el, elIdx) => (
-                  <DocxPageElement key={`${pageIdx}-${elIdx}`} element={el} />
-                ))}
-                {page.elements.length === 0 && (
+              {pages.map((page) => {
+                const canvas = pageCanvases.get(page.pageNumber);
+                return (
                   <div
-                    className="text-gray-300 text-[10pt] italic text-center py-[40pt]"
+                    key={page.pageNumber}
+                    className="bg-white shadow-[0_2px_8px_rgba(0,0,0,0.3)] relative"
+                    style={{ width: '100%', maxWidth: '7in' }}
+                  >
+                    {/* Page number label */}
+                    <div className="absolute top-2 right-3 text-[8pt] text-gray-400 bg-white/80 px-1.5 py-0.5 rounded select-none z-10">
+                      Page {page.pageNumber}
+                    </div>
+                    {canvas ? (
+                      <PdfPageCanvas canvas={canvas} />
+                    ) : (
+                      <div className="p-8 text-center text-gray-400 text-sm">
+                        PDF page not available
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+
+        {/* ─── RIGHT: DOCX Output ─── */}
+        <div className="w-1/2 flex flex-col">
+          <div className="px-4 py-2 bg-[#252525] border-b border-[#3a3a3a] shrink-0">
+            <h4 className="text-xs font-medium text-gray-400 uppercase tracking-wider">DOCX Output</h4>
+          </div>
+          <div className="flex-1 overflow-auto py-6 px-4">
+            <div
+              className="mx-auto flex flex-col items-center gap-6"
+              style={{ transform: `scale(${zoom / 100})`, transformOrigin: 'top center' }}
+            >
+              {pages.map((page, pageIdx) => (
+                <div
+                  key={pageIdx}
+                  className="bg-white shadow-[0_2px_8px_rgba(0,0,0,0.3)] relative"
+                  style={{
+                    width: '100%',
+                    maxWidth: '7in',
+                    minHeight: '9in',
+                    padding: '0.75in',
+                    boxSizing: 'border-box',
+                  }}
+                >
+                  {/* Page number label */}
+                  <div
+                    className="absolute top-2 right-3 text-[8pt] text-gray-300 select-none"
                     style={{ fontFamily: '"Calibri", sans-serif' }}
                   >
-                    (empty page)
+                    Page {page.pageNumber}
                   </div>
-                )}
-              </div>
+
+                  {/* Page content */}
+                  <div className="relative">
+                    {page.elements.map((el, elIdx) => (
+                      <DocxPageElement key={`${pageIdx}-${elIdx}`} element={el} />
+                    ))}
+                    {page.elements.length === 0 && (
+                      <div
+                        className="text-gray-300 text-[10pt] italic text-center py-[40pt]"
+                        style={{ fontFamily: '"Calibri", sans-serif' }}
+                      >
+                        (empty page)
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
             </div>
-          ))}
+          </div>
         </div>
       </div>
     </div>
@@ -835,22 +898,31 @@ export default function PdfToDocxConverter({ apiKey }: { apiKey: string }) {
           (el) => el.type === 'image' && el.bbox && el.bbox.length === 4,
         );
 
-        // Process image elements: crop + run multi-agent TikZ pipeline
-        for (const el of imageElements) {
+        // Process image elements: crop for reference, then generate TikZ as the real output
+        for (let imgIdx = 0; imgIdx < imageElements.length; imgIdx++) {
+          const el = imageElements[imgIdx];
           if (controller.signal.aborted) return;
 
+          // Crop image for reference display only (the DOCX will use TikZ-compiled image)
           const { dataUrl } = cropImageFromCanvas(canvas, el.bbox!);
           el.imageData = dataUrl;
+
+          const figLabel = imageElements.length > 1
+            ? `figure ${imgIdx + 1}/${imageElements.length}`
+            : 'figure';
 
           // Run multi-agent TikZ generation on the cropped image
           setProgress({
             current: pageNum,
             total: totalPages,
-            status: `Page ${pageNum}: generating TikZ for figure (multi-agent)...`,
+            status: `Page ${pageNum}: generating TikZ for ${figLabel} (multi-agent)...`,
           });
 
+          const cropBase64 = dataUrl.split(',')[1];
+
+          // Attempt 1: full multi-agent pipeline
+          let tikzSuccess = false;
           try {
-            const cropBase64 = dataUrl.split(',')[1];
             const result = await generateTikzMultiAgent(
               apiKey,
               cropBase64,
@@ -859,34 +931,42 @@ export default function PdfToDocxConverter({ apiKey }: { apiKey: string }) {
                 setProgress({
                   current: pageNum,
                   total: totalPages,
-                  status: `Page ${pageNum}: ${detail || stage}`,
+                  status: `Page ${pageNum} ${figLabel}: ${detail || stage}`,
                 });
               },
             );
 
             el.tikz = result.tikzCode;
 
-            // Compile the generated TikZ to image
-            try {
-              const tikzResult = await tikzToImage(result.tikzCode);
-              if (tikzResult) {
-                el.tikzImage = tikzResult;
-              }
-            } catch {
-              // TikZ browser compilation failed — keep tikz code but fall back to cropped image
+            // Compile TikZ to image
+            const tikzResult = await tikzToImage(result.tikzCode);
+            if (tikzResult) {
+              el.tikzImage = tikzResult;
+              tikzSuccess = true;
             }
           } catch (tikzErr) {
-            console.warn('Multi-agent TikZ generation failed for image element:', tikzErr);
-            // Fall back: if Gemini's initial analysis included tikz, try compiling that
-            if (el.tikz) {
-              try {
-                const tikzResult = await tikzToImage(el.tikz);
+            console.warn(`Multi-agent TikZ generation failed for ${figLabel}:`, tikzErr);
+          }
+
+          // Attempt 2: if multi-agent failed or compilation failed, retry with a single focused agent
+          if (!tikzSuccess) {
+            setProgress({
+              current: pageNum,
+              total: totalPages,
+              status: `Page ${pageNum} ${figLabel}: retrying TikZ generation...`,
+            });
+
+            try {
+              const singleCode = await generateTikzSingleAgent(apiKey, cropBase64, 'image/png');
+              if (singleCode) {
+                el.tikz = singleCode;
+                const tikzResult = await tikzToImage(singleCode);
                 if (tikzResult) {
                   el.tikzImage = tikzResult;
                 }
-              } catch {
-                // TikZ compilation failed — fall back to cropped image
               }
+            } catch {
+              // Single agent also failed — tikz code may still exist for reference
             }
           }
         }
@@ -895,7 +975,6 @@ export default function PdfToDocxConverter({ apiKey }: { apiKey: string }) {
         for (const el of elements) {
           if (controller.signal.aborted) return;
 
-          // Render display equations as images for high-quality Word output
           if (el.type === 'equation' && el.latex) {
             try {
               const eqImg = await latexToImage(el.latex, true);
@@ -990,6 +1069,7 @@ export default function PdfToDocxConverter({ apiKey }: { apiKey: string }) {
       {showViewer && documentContent && (
         <DocxViewer
           pages={documentContent}
+          pageCanvases={pageCanvasesRef.current}
           fileName={fileName}
           onDownload={downloadDocx}
           isGenerating={isGeneratingDocx}

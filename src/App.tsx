@@ -407,7 +407,7 @@ export default function App() {
       // Phase 1: Classify the image content type
       setProcessingStatus('Classifying image...');
       const classifyResponse = await ai.models.generateContent({
-        model: 'gemini-2.5-pro-preview-06-05',
+        model: 'gemini-pro-latest',
         contents: [{
           role: 'user',
           parts: [
@@ -441,7 +441,7 @@ export default function App() {
           // Fallback to original single-pass approach for TikZ
           setProcessingStatus('Generating TikZ (fallback)...');
           const fallbackResponse = await ai.models.generateContent({
-            model: 'gemini-2.5-pro-preview-06-05',
+            model: 'gemini-pro-latest',
             contents: [{
               role: 'user',
               parts: [
@@ -460,7 +460,7 @@ export default function App() {
       if (hasFormula) {
         setProcessingStatus('Extracting LaTeX formulas...');
         const formulaResponse = await ai.models.generateContent({
-          model: 'gemini-2.5-pro-preview-06-05',
+          model: 'gemini-pro-latest',
           contents: [{
             role: 'user',
             parts: [
@@ -478,7 +478,7 @@ export default function App() {
       if (!hasGeometric && !hasFormula) {
         setProcessingStatus('Processing image...');
         const response = await ai.models.generateContent({
-          model: 'gemini-2.5-pro-preview-06-05',
+          model: 'gemini-pro-latest',
           contents: [{
             role: 'user',
             parts: [

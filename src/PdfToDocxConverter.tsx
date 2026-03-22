@@ -39,7 +39,7 @@ import remarkGfm from 'remark-gfm';
 import { latexToMathChildren, parseTextWithMath } from './utils/latexToDocxMath';
 import { latexToImage, tikzToImage } from './utils/latexToImage';
 import { generateTikzMultiAgent, generateTikzSingleAgent } from './utils/tikzMultiAgent';
-import { GEMINI_MODEL, LATEX_MATH_RULES, ANTI_HALLUCINATION } from './utils/sharedPrompts';
+import { GEMINI_MODEL, LATEX_MATH_RULES, ANTI_HALLUCINATION, OUTPUT_FORMAT_RULES } from './utils/sharedPrompts';
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
@@ -119,7 +119,8 @@ ${LATEX_MATH_RULES}
 9. For numbered lists or bullet points, include the number/bullet in the paragraph content
 10. Return ONLY the JSON object — no markdown formatting, no code blocks, no explanation
 
-${ANTI_HALLUCINATION}`;
+${ANTI_HALLUCINATION}
+${OUTPUT_FORMAT_RULES}`;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 

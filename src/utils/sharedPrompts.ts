@@ -70,10 +70,25 @@ export const LATEX_MATH_RULES = `
 // ─── Anti-hallucination rules ────────────────────────────────────────────────
 
 export const ANTI_HALLUCINATION = `
-CRITICAL — accuracy rules:
-- Reproduce EXACTLY what is shown — never simplify, solve, or alter the math.
-- Never add symbols, labels, or decorations that are not visible in the image.
-- Never guess missing information — if something is unclear, omit it rather than guess.
-- If text is in Vietnamese, preserve it exactly as shown (UTF-8).
-- Only output what you can confidently read from the image.
+CRITICAL — accuracy rules you MUST follow:
+1. Reproduce EXACTLY what is shown — never simplify, solve, or alter the math.
+2. Never add symbols, labels, or decorations that are not visible in the image.
+3. Never guess missing information — if something is unclear, omit it rather than guess.
+4. If text is in Vietnamese, preserve it exactly as shown (UTF-8).
+5. Only output what you can confidently read from the image.
+6. Do NOT infer hidden values — if a number or symbol is partially obscured, mark it with \\text{[unclear]} rather than guessing.
+7. Do NOT "improve" or "correct" what appears to be a mistake in the original — reproduce it as-is.
+`;
+
+// ─── Output format guardrails ────────────────────────────────────────────────
+// Shared constraints to reduce LLM output variability
+
+export const OUTPUT_FORMAT_RULES = `
+OUTPUT FORMAT — strict rules:
+- Never wrap output in markdown code fences unless explicitly told to use \`\`\`latex.
+- Never add explanatory text before or after the code/JSON.
+- Never add comments like "Here is the code:" or "Note:".
+- If asked for JSON, output ONLY the JSON object starting with { and ending with }.
+- If asked for TikZ, output ONLY the TikZ code starting with % Required or \\begin{tikzpicture}.
+- If asked for LaTeX, output ONLY the LaTeX wrapped in $...$.
 `;

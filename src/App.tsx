@@ -8,6 +8,7 @@ import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import { motion } from 'framer-motion';
 import PdfToDocxConverter from './PdfToDocxConverter';
+import { generateTikzMultiAgent } from './utils/tikzMultiAgent';
 
 type AppMode = 'image-to-latex' | 'pdf-to-docx';
 
@@ -309,6 +310,7 @@ export default function App() {
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [processingStatus, setProcessingStatus] = useState('');
   const [result, setResult] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -388,6 +390,7 @@ export default function App() {
     setIsProcessing(true);
     setError(null);
     setResult(null);
+    setProcessingStatus('Classifying image content...');
 
     try {
       if (!apiKey) {
@@ -401,34 +404,98 @@ export default function App() {
       const mimeTypeMatch = imagePreview.match(/^data:(image\/[a-zA-Z]*);base64,/);
       const mimeType = mimeTypeMatch ? mimeTypeMatch[1] : 'image/jpeg';
 
-      const response = await ai.models.generateContent({
-        model: 'gemini-2.0-flash',
-        contents: [
-          {
-            role: 'user',
-            parts: [
-              {
-                text: SYSTEM_INSTRUCTION,
-              },
-              {
-                inlineData: {
-                  data: base64Data,
-                  mimeType: mimeType || 'image/jpeg',
-                },
-              },
-              {
-                text: 'Please process this image according to the instructions above.',
-              },
-            ],
-          }
-        ],
-        config: {
-          temperature: 0.2,
-        },
+      // Phase 1: Classify the image content type
+      setProcessingStatus('Classifying image...');
+      const classifyResponse = await ai.models.generateContent({
+        model: 'gemini-2.5-pro-preview-06-05',
+        contents: [{
+          role: 'user',
+          parts: [
+            { text: 'Classify this image. Does it contain: (A) geometric figures/diagrams/graphs, (B) mathematical formulas/expressions, or (C) both? Respond with ONLY one word: "GEOMETRIC", "FORMULA", or "BOTH".' },
+            { inlineData: { data: base64Data, mimeType: mimeType || 'image/jpeg' } },
+          ],
+        }],
+        config: { temperature: 0.0 },
       });
 
-      if (response.text) {
-        setResult(response.text);
+      const classification = (classifyResponse.text || '').trim().toUpperCase();
+      const hasGeometric = classification.includes('GEOMETRIC') || classification.includes('BOTH');
+      const hasFormula = classification.includes('FORMULA') || classification.includes('BOTH');
+
+      let tikzPart = '';
+      let formulaPart = '';
+
+      // Phase 2A: If geometric, run multi-agent TikZ pipeline
+      if (hasGeometric) {
+        setProcessingStatus('Running multi-agent TikZ generation...');
+        try {
+          const tikzResult = await generateTikzMultiAgent(
+            apiKey,
+            base64Data,
+            mimeType || 'image/jpeg',
+            (_stage, detail) => setProcessingStatus(detail || _stage),
+          );
+          tikzPart = '```latex\n' + tikzResult.tikzCode + '\n```';
+        } catch (tikzErr) {
+          console.warn('Multi-agent TikZ failed, falling back to single-pass:', tikzErr);
+          // Fallback to original single-pass approach for TikZ
+          setProcessingStatus('Generating TikZ (fallback)...');
+          const fallbackResponse = await ai.models.generateContent({
+            model: 'gemini-2.5-pro-preview-06-05',
+            contents: [{
+              role: 'user',
+              parts: [
+                { text: SYSTEM_INSTRUCTION },
+                { inlineData: { data: base64Data, mimeType: mimeType || 'image/jpeg' } },
+                { text: 'Please process this image. Focus on the geometric figure and generate TikZ code.' },
+              ],
+            }],
+            config: { temperature: 0.2 },
+          });
+          tikzPart = fallbackResponse.text || '';
+        }
+      }
+
+      // Phase 2B: If formula, extract LaTeX formulas
+      if (hasFormula) {
+        setProcessingStatus('Extracting LaTeX formulas...');
+        const formulaResponse = await ai.models.generateContent({
+          model: 'gemini-2.5-pro-preview-06-05',
+          contents: [{
+            role: 'user',
+            parts: [
+              { text: SYSTEM_INSTRUCTION },
+              { inlineData: { data: base64Data, mimeType: mimeType || 'image/jpeg' } },
+              { text: 'Please process this image according to the instructions above. Focus on extracting all mathematical formulas and expressions.' },
+            ],
+          }],
+          config: { temperature: 0.2 },
+        });
+        formulaPart = formulaResponse.text || '';
+      }
+
+      // If neither was detected, do a full pass with the original approach
+      if (!hasGeometric && !hasFormula) {
+        setProcessingStatus('Processing image...');
+        const response = await ai.models.generateContent({
+          model: 'gemini-2.5-pro-preview-06-05',
+          contents: [{
+            role: 'user',
+            parts: [
+              { text: SYSTEM_INSTRUCTION },
+              { inlineData: { data: base64Data, mimeType: mimeType || 'image/jpeg' } },
+              { text: 'Please process this image according to the instructions above.' },
+            ],
+          }],
+          config: { temperature: 0.2 },
+        });
+        formulaPart = response.text || '';
+      }
+
+      // Combine results
+      const combined = [tikzPart, formulaPart].filter(Boolean).join('\n\n');
+      if (combined) {
+        setResult(combined);
       } else {
         setError("No text returned from the model.");
       }
@@ -447,6 +514,7 @@ export default function App() {
       }
     } finally {
       setIsProcessing(false);
+      setProcessingStatus('');
     }
   };
 
@@ -659,7 +727,7 @@ export default function App() {
                   {isProcessing ? (
                     <div className="h-full flex flex-col items-center justify-center text-[#00186E]/40 space-y-4 p-8">
                       <Loader2 className="w-10 h-10 animate-spin text-[#FFAD1D]" />
-                      <p className="text-sm font-medium animate-pulse font-sans-brand">Analyzing math content and generating LaTeX...</p>
+                      <p className="text-sm font-medium animate-pulse font-sans-brand">{processingStatus || 'Analyzing math content and generating LaTeX...'}</p>
                     </div>
                   ) : error ? (
                     <div className="p-6">

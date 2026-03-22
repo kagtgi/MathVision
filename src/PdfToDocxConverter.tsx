@@ -38,6 +38,7 @@ import rehypeKatex from 'rehype-katex';
 import remarkGfm from 'remark-gfm';
 import { latexToMathChildren, parseTextWithMath } from './utils/latexToDocxMath';
 import { latexToImage, tikzToImage } from './utils/latexToImage';
+import { generateTikzMultiAgent } from './utils/tikzMultiAgent';
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
@@ -46,9 +47,9 @@ const MAX_PDF_SIZE_MB = 50;
 const PDF_RENDER_SCALE = 2;
 const JPEG_QUALITY = 0.85;
 const DOCX_MAX_IMAGE_WIDTH = 500; // points (~6.9 inches)
-const GEMINI_MODEL = 'gemini-2.0-flash';
+const GEMINI_MODEL = 'gemini-2.5-pro-preview-06-05';
 const GEMINI_TEMPERATURE = 0.1;
-const API_TIMEOUT_MS = 60_000; // 60 seconds per page
+const API_TIMEOUT_MS = 120_000; // 120 seconds per page (pro model is slower)
 
 // ─── PDF.js Worker Setup ─────────────────────────────────────────────────────
 
@@ -108,9 +109,9 @@ Rules:
 4. "equation": for standalone/display equations on their own line. Put LaTeX WITHOUT $ delimiters in the "latex" field. Convert with image-to-LaTeX quality: capture every symbol, subscript, superscript, fraction, operator, and decoration exactly as shown
 5. "table": for tables. Each cell is a string. Use $...$ for LaTeX math or plain text in cells. Include header row as first row
 6. "image": for figures, diagrams, geometric drawings, charts, and graphs:
-   - bbox = [x%, y%, width%, height%] as percentage of page dimensions
+   - bbox = [x%, y%, width%, height%] as percentage of page dimensions — be VERY precise with bounding box coordinates
    - Include caption if visible
-   - IMPORTANT: For geometric figures, diagrams, graphs, and mathematical drawings, also generate a "tikz" field with complete TikZ code (\\begin{tikzpicture}...\\end{tikzpicture}) that faithfully reproduces the figure. Use TikZ libraries: calc, arrows.meta, decorations.markings, angles, quotes. Include labels, colors, line styles, and all visual details. For photos or non-geometric images, omit the "tikz" field.
+   - Do NOT include a "tikz" field — TikZ code will be generated separately by a specialized pipeline
 7. Preserve ALL text EXACTLY as shown (including non-English characters)
 8. Convert ALL mathematical expressions to proper LaTeX notation with maximum accuracy:
    - Use \\frac{}{} for fractions, \\sqrt{} for roots, \\widehat{} for angle notation
@@ -829,14 +830,54 @@ export default function PdfToDocxConverter({ apiKey }: { apiKey: string }) {
           status: `Processing elements on page ${pageNum}...`,
         });
 
-        for (const el of elements) {
+        // Collect image elements that need multi-agent TikZ generation
+        const imageElements = elements.filter(
+          (el) => el.type === 'image' && el.bbox && el.bbox.length === 4,
+        );
+
+        // Process image elements: crop + run multi-agent TikZ pipeline
+        for (const el of imageElements) {
           if (controller.signal.aborted) return;
 
-          if (el.type === 'image' && el.bbox && el.bbox.length === 4) {
-            const { dataUrl } = cropImageFromCanvas(canvas, el.bbox);
-            el.imageData = dataUrl;
+          const { dataUrl } = cropImageFromCanvas(canvas, el.bbox!);
+          el.imageData = dataUrl;
 
-            // If TikZ code was generated for this image, compile it to a rendered image
+          // Run multi-agent TikZ generation on the cropped image
+          setProgress({
+            current: pageNum,
+            total: totalPages,
+            status: `Page ${pageNum}: generating TikZ for figure (multi-agent)...`,
+          });
+
+          try {
+            const cropBase64 = dataUrl.split(',')[1];
+            const result = await generateTikzMultiAgent(
+              apiKey,
+              cropBase64,
+              'image/png',
+              (stage, detail) => {
+                setProgress({
+                  current: pageNum,
+                  total: totalPages,
+                  status: `Page ${pageNum}: ${detail || stage}`,
+                });
+              },
+            );
+
+            el.tikz = result.tikzCode;
+
+            // Compile the generated TikZ to image
+            try {
+              const tikzResult = await tikzToImage(result.tikzCode);
+              if (tikzResult) {
+                el.tikzImage = tikzResult;
+              }
+            } catch {
+              // TikZ browser compilation failed — keep tikz code but fall back to cropped image
+            }
+          } catch (tikzErr) {
+            console.warn('Multi-agent TikZ generation failed for image element:', tikzErr);
+            // Fall back: if Gemini's initial analysis included tikz, try compiling that
             if (el.tikz) {
               try {
                 const tikzResult = await tikzToImage(el.tikz);
@@ -848,6 +889,11 @@ export default function PdfToDocxConverter({ apiKey }: { apiKey: string }) {
               }
             }
           }
+        }
+
+        // Process equation elements
+        for (const el of elements) {
+          if (controller.signal.aborted) return;
 
           // Render display equations as images for high-quality Word output
           if (el.type === 'equation' && el.latex) {

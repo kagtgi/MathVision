@@ -9,7 +9,7 @@ import rehypeKatex from 'rehype-katex';
 import { motion } from 'framer-motion';
 import PdfToDocxConverter from './PdfToDocxConverter';
 import { generateTikzMultiAgent } from './utils/tikzMultiAgent';
-import { GEMINI_MODEL, LATEX_MATH_RULES, ANTI_HALLUCINATION } from './utils/sharedPrompts';
+import { GEMINI_MODEL, LATEX_MATH_RULES, ANTI_HALLUCINATION, OUTPUT_FORMAT_RULES } from './utils/sharedPrompts';
 
 type AppMode = 'image-to-latex' | 'pdf-to-docx';
 
@@ -26,7 +26,8 @@ Convert handwritten or printed math content from images into clean LaTeX.
 - Preserve Vietnamese text exactly as shown (UTF-8).
 ${ANTI_HALLUCINATION}
 
-## Step 1 — Classify
+## Step 1 — Classify the image content
+Determine what the image contains. There are exactly two categories:
 - TYPE A — GEOMETRIC FIGURE (shapes, diagrams, coordinate systems, graphs)
 - TYPE B — FORMULA / EXPRESSION (equations, integrals, matrices, etc.)
 If BOTH present, output both (TikZ block first, then LaTeX block).
@@ -56,10 +57,12 @@ The multi-agent pipeline will refine it, but make a best effort:
 - Never use \\textbf, \\textit, \\emph, \\color.
 ${LATEX_MATH_RULES}
 
-## Output format
+## Output format — STRICT
 - Output ONLY code block(s) — no explanation before or after.
 - If both types: TikZ block first, then LaTeX block.
-`;
+- Never say "Here is..." or "The code is..." — just output the code.
+- Every response must start with either \`\`\`latex or a plain text line from the image.
+${OUTPUT_FORMAT_RULES}`;
 
 export default function App() {
   const [apiKey, setApiKey] = useState('');

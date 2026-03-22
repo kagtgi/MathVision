@@ -243,24 +243,34 @@ export async function tikzToImage(
 }
 
 /**
- * Poll for an SVG element inside a container (created by TikZJax).
+ * Wait for an SVG element inside a container (created by TikZJax).
+ * Uses MutationObserver for instant detection instead of rAF polling.
  */
 function waitForTikzSvg(container: HTMLElement, timeoutMs: number): Promise<SVGSVGElement | null> {
   return new Promise((resolve) => {
-    const startTime = Date.now();
+    // Check immediately in case SVG is already present
+    const existing = container.querySelector('svg');
+    if (existing) { resolve(existing); return; }
 
-    const check = () => {
+    let settled = false;
+    const observer = new MutationObserver(() => {
       const svg = container.querySelector('svg');
-      if (svg) {
+      if (svg && !settled) {
+        settled = true;
+        observer.disconnect();
+        clearTimeout(timer);
         resolve(svg);
-        return;
       }
-      if (Date.now() - startTime > timeoutMs) {
+    });
+
+    const timer = setTimeout(() => {
+      if (!settled) {
+        settled = true;
+        observer.disconnect();
         resolve(null);
-        return;
       }
-      requestAnimationFrame(check);
-    };
-    check();
+    }, timeoutMs);
+
+    observer.observe(container, { childList: true, subtree: true });
   });
 }

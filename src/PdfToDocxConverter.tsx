@@ -39,6 +39,7 @@ import remarkGfm from 'remark-gfm';
 import { latexToMathChildren, parseTextWithMath } from './utils/latexToDocxMath';
 import { latexToImage, tikzToImage } from './utils/latexToImage';
 import { generateTikzMultiAgent, generateTikzSingleAgent } from './utils/tikzMultiAgent';
+import { GEMINI_MODEL, LATEX_MATH_RULES, ANTI_HALLUCINATION } from './utils/sharedPrompts';
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
@@ -47,7 +48,6 @@ const MAX_PDF_SIZE_MB = 50;
 const PDF_RENDER_SCALE = 2;
 const JPEG_QUALITY = 0.85;
 const DOCX_MAX_IMAGE_WIDTH = 500; // points (~6.9 inches)
-const GEMINI_MODEL = 'gemini-pro-latest';
 const GEMINI_TEMPERATURE = 0.1;
 const API_TIMEOUT_MS = 120_000; // 120 seconds per page (pro model is slower)
 
@@ -98,7 +98,7 @@ JSON structure:
     {"type": "paragraph", "content": "Regular text. Use $x^2$ for inline math."},
     {"type": "equation", "latex": "E = mc^2"},
     {"type": "table", "rows": [["Header 1", "Header 2"], ["$\\\\frac{a}{b}$", "text value"]]},
-    {"type": "image", "bbox": [10, 20, 30, 25], "caption": "Figure 1: Description", "tikz": "\\\\begin{tikzpicture}...\\\\end{tikzpicture}"}
+    {"type": "image", "bbox": [10, 20, 30, 25], "caption": "Figure 1: Description"}
   ]
 }
 
@@ -114,13 +114,11 @@ Rules:
    - Do NOT include a "tikz" field — TikZ code will be generated separately by a specialized pipeline
 7. Preserve ALL text EXACTLY as shown (including non-English characters)
 8. Convert ALL mathematical expressions to proper LaTeX notation with maximum accuracy:
-   - Use \\frac{}{} for fractions, \\sqrt{} for roots, \\widehat{} for angle notation
-   - Use \\overrightarrow{} for vectors/rays, \\triangle for triangles
-   - Use correct Greek letters (\\alpha, \\beta, \\gamma, etc.)
-   - Use \\left( \\right) for auto-sized delimiters
-   - Reproduce every detail: superscripts, subscripts, decorations, operators
+${LATEX_MATH_RULES}
 9. For numbered lists or bullet points, include the number/bullet in the paragraph content
-10. Return ONLY the JSON object — no markdown formatting, no code blocks, no explanation`;
+10. Return ONLY the JSON object — no markdown formatting, no code blocks, no explanation
+
+${ANTI_HALLUCINATION}`;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 

@@ -8,298 +8,57 @@ import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import { motion } from 'framer-motion';
 import PdfToDocxConverter from './PdfToDocxConverter';
+import { generateTikzMultiAgent } from './utils/tikzMultiAgent';
+import { GEMINI_MODEL, LATEX_MATH_RULES, ANTI_HALLUCINATION } from './utils/sharedPrompts';
 
 type AppMode = 'image-to-latex' | 'pdf-to-docx';
 
 const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20MB
 
 const SYSTEM_INSTRUCTION = `You are MathVision, an expert assistant for mathematics teachers in Vietnam.
-You help teachers convert handwritten or printed math content from images into clean, ready-to-use LaTeX — either TikZ figures or inline/display formulas.
+Convert handwritten or printed math content from images into clean LaTeX.
 
-## Behavior
-- Always respond in the same language the teacher uses (Vietnamese or English)
-- Be concise and direct — teachers are busy; skip all preamble
-- Never explain what LaTeX, TikZ, or MathType is
-- Never simplify, solve, or alter the math — reproduce exactly what is shown
-- If the image is unreadable or contains no math, say so in one sentence
+## Rules
+- Respond in the same language the teacher uses (Vietnamese or English).
+- Be concise — output ONLY the code block(s), no prose, no preamble.
+- Never simplify, solve, or alter the math — reproduce exactly what is shown.
+- If the image is unreadable or contains no math, say so in one sentence only.
+- Preserve Vietnamese text exactly as shown (UTF-8).
+${ANTI_HALLUCINATION}
 
-## Output structure (always in this order)
-1. TikZ code block — if a geometric figure is detected
-2. LaTeX formula block — if formulas or expressions are detected
-3. Short annotation (3–5 lines) — ambiguities, assumptions, items to verify
+## Step 1 — Classify
+- TYPE A — GEOMETRIC FIGURE (shapes, diagrams, coordinate systems, graphs)
+- TYPE B — FORMULA / EXPRESSION (equations, integrals, matrices, etc.)
+If BOTH present, output both (TikZ block first, then LaTeX block).
 
-## Formula style
-- ALL math — inline, display, multi-line — must be wrapped in $...$
-- One $...$ per line for multi-step working — never chain steps into one block
-- Never use \\[ \\], align, align*, equation, gather, or any display environment
-- Use cases for systems and piecewise; pmatrix/bmatrix for matrices
-- For plain text (problem labels, descriptions, annotations): type as plain text only
-- Never use \\textbf, \\textit, \\emph, \\color, \\underline, or any text-formatting LaTeX commands — plain text needs no LaTeX wrapper at all
+## Step 2A — Geometric figures → TikZ code
 
-## Geometry naming rules (CRITICAL — apply these every time)
+Output a complete, compilable TikZ figure inside a \`\`\`latex code block.
+The multi-agent pipeline will refine it, but make a best effort:
 
-### Points
-- A single labeled point → $A$, $B$, $M$, $N$, $O$, $H$, $I$ (capital italic letter, no decoration)
-- Midpoint label stays italic: $M$ is midpoint of $AB$
+- Wrap in \\begin{tikzpicture}[scale=1]...\\end{tikzpicture}
+- Declare \\usetikzlibrary{...} as comments at the top
+- Use named \\coordinate for every point BEFORE using it
+- Mark every labeled point: \\fill (A) circle (1.5pt); \\node[anchor] at (A) {$A$};
+- All math labels in $...$
+- [thick] for main edges, [dashed] for construction lines
+- Right angles: \\pic[draw] {right angle = A--H--B};
+- Angle arcs: \\pic[draw, angle radius=8pt, "$\\alpha$", angle eccentricity=1.5] {angle = C--B--A};
+- Equal-segment ticks: decorations.markings
+- Fit in [0,6]×[0,6], scale=1 default
+- Do NOT add elements not visible in the image.
 
-### Segments, lines, rays
-- Segment between two points → $AB$ (no bar, no arrow, just the two letters)
-- Length of segment → $AB$ with context, or $|AB|$ if needed to distinguish from the segment itself
-- Line through A and B → $\\overleftrightarrow{AB}$
-- Ray from A through B → $\\overrightarrow{AB}$
-- Vector from A to B → $\\overrightarrow{AB}$ (same as ray — context determines meaning)
+## Step 2B — Formulas → LaTeX
 
-### Angles
-- Angle with vertex B, arms BA and BC → $\\widehat{ABC}$ (Vietnamese convention) or $\\angle ABC$
-  Use whichever notation is shown in the image; default to $\\widehat{ABC}$
-- Angle named by a single letter → $\\widehat{A}$ or $\\angle A$
-- Angle value: $\\widehat{ABC} = 60{}^\\circ$ (always use {}^\\circ, never bare ° or ^\\circ)
+- Wrap ALL math in $...$. One $...$ per line for multi-line derivations.
+- Never use \\[ \\], align, align*, equation, gather, or display environments.
+- Plain text (labels, problem numbers) → as-is, no LaTeX wrapper.
+- Never use \\textbf, \\textit, \\emph, \\color.
+${LATEX_MATH_RULES}
 
-### Triangles and polygons
-- Triangle with vertices A, B, C → $\\triangle ABC$
-- Quadrilateral / polygon → $ABCD$, $ABCDE$ (no special command needed)
-- Congruent triangles → $\\triangle ABC \\cong \\triangle DEF$
-- Similar triangles → $\\triangle ABC \\sim \\triangle DEF$
-
-### Circles
-- Circle with center O → $(O)$ or $(O; R)$ when radius R is given
-- Arc from A to B → $\\overset{\\frown}{AB}$
-
-### Geometric relations
-- Perpendicular: $AB \\perp CD$ (at point H: $AB \\perp CD$ tại $H$)
-- Parallel: $AB \\parallel CD$
-- Equal segments: $AB = CD$
-- Midpoint: $M$ là trung điểm của $AB$ (Vietnamese) / $M$ is the midpoint of $AB$
-- Bisector: đường phân giác of $\\widehat{BAC}$
-- Altitude, median, bisector labels: $AH$, $AM$, $AD$ — just segment notation
-
-### Areas and special notation
-- Area of triangle ABC → $S_{\\triangle ABC}$ or $S_{ABC}$
-- Radius → $R$ (circumradius), $r$ (inradius)
-- Diagonal of polygon → $AC$, $BD$ — segment notation
-
-## Number and expression recognition rules
-
-### Integers and decimals
-- Integers: $5$, $-3$, $100$, $0$
-- Decimal with dot (English): $3.14$, $0.5$
-- Decimal with comma (Vietnamese): $3{,}14$ — wrap the comma in braces: $3{,}14$
-- Negative numbers: $-5$, $-\\frac{1}{2}$
-
-### Fractions and roots
-- Fraction: $\\frac{a}{b}$ — always use \\frac, never a/b
-- Mixed number shown in image: render as $2\\dfrac{1}{3}$ or $\\frac{7}{3}$ (prefer improper fraction if ambiguous)
-- Square root: $\\sqrt{5}$, $\\sqrt{a^2 + b^2}$
-- nth root: $\\sqrt[3]{8}$, $\\sqrt[n]{x}$
-
-### Scientific and special notation
-- Scientific notation: $2 \\times 10^{5}$, $1{,}6 \\times 10^{-19}$
-- Percentage: $75\\%$
-- Absolute value: $\\left| x \\right|$ (use \\left\\vert...\\right\\vert if inside large expressions)
-- Floor/ceiling: $\\lfloor x \\rfloor$, $\\lceil x \\rceil$
-- Infinity: $+\\infty$, $-\\infty$, $\\infty$
-
-### Subscripts and superscripts
-- Variable with subscript: $x_1$, $a_n$, $u_k$
-- Variable with superscript: $x^2$, $a^n$
-- Both: $a_n^2$, $x_i^k$
-- Named constants: $e$ (Euler's number), $\\pi$, $i$ (imaginary unit)
-
-## TikZ style
-- Always wrap in \\begin{tikzpicture}...\\end{tikzpicture}
-- Declare all required \\usetikzlibrary{...} at the top as comments
-- Mark right angles with pic {right angle=...}
-- Wrap all math inside \\node labels with $...$
-- Add brief inline comments explaining key elements
-
-## Language & context
-- Students and teachers use Vietnamese; labels like "Bài 1:", "đường thẳng AB", "tam giác ABC" may appear — preserve them using UTF-8 in \\node or comments
-- Common content types: high school geometry (triangles, circles, solid geometry), calculus (limits, derivatives, integrals), algebra (systems, polynomials), probability and statistics
-
-## What to ignore
-- Do not comment on image quality unless it prevents transcription
-- Do not offer alternative approaches or teaching suggestions unless asked
-- Do not add \\documentclass or \\begin{document} wrappers unless explicitly requested
-
----
-
-## STEP 1 — Classify the image
-Analyze the image and identify ALL content types present:
-- TYPE A — GEOMETRIC FIGURE: Drawn shapes, diagrams, coordinate systems, function graphs, geometric constructions, vectors, or any visual/spatial figure.
-- TYPE B — FORMULA / EXPRESSION: Mathematical notation — equations, expressions, integrals, matrices, fractions, limits, summations, or similar symbolic content.
-If BOTH types are present, produce BOTH outputs (Step 2A and Step 2B).
-If only one type is present, produce only that output.
-
----
-
-## STEP 2A — If TYPE A is present: Produce TikZ code
-
-Generate a complete, compilable TikZ figure that faithfully and accurately reproduces the image.
-
-### Required libraries (declare as comments at top of code block)
-Always include exactly the libraries you use from this list:
-- angles, quotes — for angle arcs and labels
-- calc — for coordinate arithmetic ($(A)!0.5!(B)$ midpoints, intersections)
-- arrows.meta — for custom arrowheads (Stealth, LaTeX)
-- intersections — for named path intersections
-- patterns — for hatching/shading regions
-- decorations.markings — for tick marks on equal segments
-- decorations.pathmorphing — for wavy/zigzag lines
-- positioning — for relative node placement
-
-### Coordinate and scaling guidelines
-- Choose coordinates so the figure fits naturally in a [0,6] × [0,6] region (adjust scale if needed)
-- Use [scale=1] by default; increase for small figures (scale=1.5) or decrease for large ones (scale=0.7)
-- Use named coordinates: \\coordinate (A) at (0,0); — then refer to (A) everywhere, never repeat raw numbers
-- Compute midpoints with calc: \\coordinate (M) at ($(A)!0.5!(B)$);
-- Compute foot of perpendicular or intersection points precisely using calc or intersections
-
-### Points and labels
-- Mark every labeled point with a small filled circle: \\fill[black] (A) circle (1.5pt);
-- Place point labels offset from the point using anchor:
-  - Bottom-left points: \\node[below left] at (A) {$A$};
-  - Top points: \\node[above] at (B) {$B$};
-  - Right points: \\node[right] at (C) {$C$};
-  - Choose anchor direction away from the figure interior
-- Use font=\\small inside nodes for consistency: \\node[above, font=\\small] at (B) {$B$};
-- All point names in nodes MUST use math mode: {$A$}, {$B$}, {$M$}
-
-### Lines, segments, and sides
-- Segments: \\draw[thick] (A) -- (B); (use thick for main figure edges)
-- Extended lines: \\draw[dashed] (A) -- ($(A)!1.3!(B)$); (use dashed for extensions/construction lines)
-- Auxiliary lines: \\draw[dashed, thin] ...
-- Parallel arrows (tick marks for equal segments): use decorations.markings with a single or double tick
-  \\draw[decoration={markings, mark=at position 0.5 with {\\draw (0,-2pt) -- (0,2pt);}}, decorate] (A) -- (B);
-- For double tick marks on equal segments: use two marks at 0.45 and 0.55
-
-### Angles
-- Always use the angles + quotes library for angle arcs:
-  \\pic[draw, angle radius=8pt, "$\\alpha$", angle eccentricity=1.5] {angle = C--B--A};
-- Right angle: \\pic[draw] {right angle = A--H--B}; (no label needed)
-- Large angles: increase angle radius to 12pt or 16pt so the arc is visible
-- Angle label placement: angle eccentricity=1.5 to 2.0 keeps the label clear of the arc
-
-### Circles and arcs
-- Full circle: \\draw[thick] (O) circle (r);
-- Arc: \\draw[thick] (A) arc[start angle=30, end angle=150, radius=2cm];
-- Or via coordinates: \\draw[thick] ($(O)+(30:2)$) arc[start angle=30, end angle=150, radius=2];
-- Center point: \\fill (O) circle (1.5pt); \\node[below] at (O) {$O$};
-
-### Axes and coordinate systems
-- x-axis: \\draw[->] (-0.3,0) -- (5,0) node[right] {$x$};
-- y-axis: \\draw[->] (0,-0.3) -- (0,5) node[above] {$y$};
-- Origin label: \\node[below left] at (0,0) {$O$};
-- Grid ticks: \\foreach \\x in {1,2,3,4} { \\draw (\\x,2pt) -- (\\x,-2pt) node[below] {$\\x$}; }
-- Negative axis: extend with dashed line if values go negative
-
-### Function graphs
-- Smooth curve: \\draw[domain=0:4, smooth, samples=100, thick] plot (\\x, {\\x*\\x/4});
-- Named function: \\draw[domain=-2:2, smooth, thick, blue] plot (\\x, {exp(-\\x*\\x)}) node[right] {$y=e^{-x^2}$};
-- Asymptote: \\draw[dashed, thin] (0,1) -- (5,1);
-
-### Shading and patterns
-- Fill a region: \\fill[gray!20] (A) -- (B) -- (C) -- cycle;
-- Hatch: \\fill[pattern=north east lines] (A) -- (B) -- (C) -- cycle;
-
-### Quality checklist before outputting
-1. All \\usetikzlibrary{...} needed by the code are declared
-2. Every named coordinate is defined before use
-3. Every labeled point has a \\fill circle and a \\node label
-4. Right angles use pic {right angle=...}
-5. Equal segments have tick marks via decorations.markings
-6. Angle arcs use \\pic with angles library — not bare \\draw arcs for labeled angles
-7. All node math is inside $...$
-8. Figure is centered and scaled to fit (not cut off, not tiny)
-9. Code compiles with pdfLaTeX + \\usepackage{tikz} and declared \\usetikzlibraries
-
-Output format:
-\`\`\`latex
-% Required packages: \\usepackage{tikz}
-% \\usetikzlibrary{angles, quotes, calc, arrows.meta, decorations.markings}
-
-\\begin{tikzpicture}[scale=1]
-  % Define coordinates
-  \\coordinate (A) at (0,0);
-  \\coordinate (B) at (4,0);
-  \\coordinate (C) at (2,3);
-
-  % Draw triangle sides
-  \\draw[thick] (A) -- (B) -- (C) -- cycle;
-
-  % Mark points
-  \\fill (A) circle (1.5pt); \\node[below left] at (A) {$A$};
-  \\fill (B) circle (1.5pt); \\node[below right] at (B) {$B$};
-  \\fill (C) circle (1.5pt); \\node[above] at (C) {$C$};
-\\end{tikzpicture}
-\`\`\`
-
----
-
-## STEP 2B — If TYPE B is present: Produce LaTeX formulas
-Transcribe all mathematical content into clean LaTeX suitable for MathType, Overleaf, or any LaTeX editor.
-### Formula rules
-
-- Wrap ALL math content in $...$ — there is no other math environment
-- One $...$ per line for multi-line derivations:
-
-  $f\\left( x \\right) = x^2 + 2x + 1$
-  $f\\left( x \\right) = \\left( x+1 \\right)^2$
-  $\{f\}'\\left( x \\right) = 2\\left( x+1 \\right)$
-
-- For piecewise / systems, use $...$ containing a cases environment:
-
-  $\\begin{cases} 2x + y = 5 \\\\ x - y = 1 \\end{cases}$
-
-- For matrices:
-
-  $\\begin{pmatrix} a & b \\\\ c & d \\end{pmatrix}$
-
-- Plain text (labels, descriptions, problem numbers) → type as-is, no LaTeX
-- Never use \\[ \\], align, align*, equation, gather, \\textbf, \\textit, or \\color
-
-### Transcription rules
-- Reproduce exactly what is shown — do NOT simplify, factor, or solve
-- Preserve ALL exponents, subscripts, superscripts exactly as written
-- Apply geometry naming rules above for all points, segments, angles, triangles
-- Apply number recognition rules above for all numeric values
-- ALWAYS use \\left and \\right for ALL brackets, parentheses, and braces — no exceptions:
-  - Parentheses: $\\left( ... \\right)$ — never use bare ( )
-  - Square brackets: $\\left[ ... \\right]$ — never use bare [ ]
-  - Curly braces: $\\left\\{ ... \\right\\}$ — never use bare \\{ \\}
-  - Examples: $\\left( x + 1 \\right)$, $\\left[ a, b \\right]$, $\\left\\{ 1, 2, 3 \\right\\}$
-- For derivatives with prime notation, always wrap the base in braces before the prime:
-  - Correct: $\{y\}'$, $\{f\}'(x)$, $\{y\}''$, $\{f\}''(x)$
-  - Wrong: $y'$, $f'(x)$, $y''$
-- For degree symbols, always use {}^\\circ with braces before it:
-  - Correct: $30{}^\\circ$, $\\widehat{BAC} = 30{}^\\circ$
-  - Wrong: $30°$, $30^\\circ$, $30^{\\circ}$
-- Standard commands: \\frac{a}{b}, \\int_{a}^{b} f(x)\\,dx, \\sum_{i=1}^{n}, \\lim_{x \\to \\infty}, \\sqrt{...}, \\sqrt[n]{...}, \\vec{v}, \\overrightarrow{AB}, \\alpha \\beta \\theta \\pi \\Delta \\Sigma (etc.)
-- For piecewise functions or systems of equations use cases:
-    \\begin{cases}
-      2x + y = 5 \\\\
-      x - y = 1
-    \\end{cases}
-
-Output format:
-\`\`\`latex
-$x^2 + y^2 = r^2$
-$\\left( x - a \\right)^2 + \\left( y - b \\right)^2 = r^2$
-$\\widehat{ABC} = 90{}^\\circ$
-$\\triangle ABC \\cong \\triangle DEF$
-$AB \\perp CD$
-$\\overrightarrow{AB} + \\overrightarrow{BC} = \\overrightarrow{AC}$
-$S_{\\triangle ABC} = \\frac{1}{2} \\cdot AB \\cdot h$
-$\{y\}' = 2x$
-\`\`\`
-
----
-
-## Format rules
-- Output ONLY the code block(s) — no prose, no preamble, no annotation, no explanation before or after
-- If both TYPE A and TYPE B are present, output Step 2A block first, then Step 2B block — nothing else
-- Never explain what TikZ or LaTeX is
-- If the image is blank, unreadable, or contains no math, say so in one sentence only
-- If the image contains Vietnamese text labels (e.g. "Bài 1:", "đường thẳng AB"), include them as \\node labels or comments using UTF-8 encoding
+## Output format
+- Output ONLY code block(s) — no explanation before or after.
+- If both types: TikZ block first, then LaTeX block.
 `;
 
 export default function App() {
@@ -309,6 +68,8 @@ export default function App() {
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [processingStatus, setProcessingStatus] = useState('');
+  const [processingLog, setProcessingLog] = useState<string[]>([]);
   const [result, setResult] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -388,6 +149,8 @@ export default function App() {
     setIsProcessing(true);
     setError(null);
     setResult(null);
+    setProcessingStatus('Analyzing image...');
+    setProcessingLog([]);
 
     try {
       if (!apiKey) {
@@ -396,42 +159,73 @@ export default function App() {
 
       const ai = new GoogleGenAI({ apiKey });
 
-      // Extract base64 data (remove the data:image/...;base64, part)
       const base64Data = imagePreview.split(',')[1];
       const mimeTypeMatch = imagePreview.match(/^data:(image\/[a-zA-Z]*);base64,/);
       const mimeType = mimeTypeMatch ? mimeTypeMatch[1] : 'image/jpeg';
 
+      // Phase 1: Single call — classify + extract in one pass
+      setProcessingStatus('Processing image with AI...');
+      setProcessingLog((prev) => [...prev, 'Sending image to Gemini Pro for analysis...']);
+
       const response = await ai.models.generateContent({
-        model: 'gemini-2.0-flash',
-        contents: [
-          {
-            role: 'user',
-            parts: [
-              {
-                text: SYSTEM_INSTRUCTION,
-              },
-              {
-                inlineData: {
-                  data: base64Data,
-                  mimeType: mimeType || 'image/jpeg',
-                },
-              },
-              {
-                text: 'Please process this image according to the instructions above.',
-              },
-            ],
-          }
-        ],
-        config: {
-          temperature: 0.2,
-        },
+        model: GEMINI_MODEL,
+        contents: [{
+          role: 'user',
+          parts: [
+            { text: SYSTEM_INSTRUCTION },
+            { inlineData: { data: base64Data, mimeType: mimeType || 'image/jpeg' } },
+            { text: 'Process this image according to the instructions above.' },
+          ],
+        }],
+        config: { temperature: 0.2 },
       });
 
-      if (response.text) {
-        setResult(response.text);
-      } else {
+      let output = response.text || '';
+      if (!output) {
         setError("No text returned from the model.");
+        return;
       }
+
+      setProcessingLog((prev) => [...prev, 'Initial analysis complete.']);
+
+      // Phase 2: If TikZ code was produced, enhance it via multi-agent pipeline
+      const hasTikz = output.includes('\\begin{tikzpicture}');
+      if (hasTikz) {
+        setProcessingStatus('Enhancing TikZ with multi-agent pipeline...');
+        setProcessingLog((prev) => [...prev, 'Geometric figure detected — running multi-agent TikZ pipeline for higher accuracy...']);
+
+        try {
+          const tikzResult = await generateTikzMultiAgent(
+            apiKey,
+            base64Data,
+            mimeType || 'image/jpeg',
+            (_stage, detail) => {
+              setProcessingStatus(detail);
+              setProcessingLog((prev) => [...prev, detail]);
+            },
+          );
+
+          if (tikzResult.log.length > 0) {
+            setProcessingLog((prev) => [...prev, ...tikzResult.log]);
+          }
+
+          // Replace the initial TikZ block with the enhanced version
+          const enhancedTikz = '```latex\n' + tikzResult.tikzCode + '\n```';
+          // Remove the original tikz code block and replace
+          output = output.replace(/```latex\s*\n(?:% Required[\s\S]*?)?\\begin\{tikzpicture\}[\s\S]*?\\end\{tikzpicture\}\s*\n```/g, enhancedTikz);
+
+          // If replacement didn't work (different format), prepend
+          if (!output.includes(tikzResult.tikzCode)) {
+            const formulaPart = output.replace(/```latex\s*\n[\s\S]*?\\begin\{tikzpicture\}[\s\S]*?\\end\{tikzpicture\}\s*\n```/g, '').trim();
+            output = [enhancedTikz, formulaPart].filter(Boolean).join('\n\n');
+          }
+        } catch (tikzErr) {
+          console.warn('Multi-agent TikZ enhancement failed, keeping initial output:', tikzErr);
+          setProcessingLog((prev) => [...prev, 'Multi-agent enhancement failed — keeping initial TikZ output.']);
+        }
+      }
+
+      setResult(output);
     } catch (err: unknown) {
       console.error("Error processing image:", err);
       const message = err instanceof Error ? err.message : String(err);
@@ -447,6 +241,7 @@ export default function App() {
       }
     } finally {
       setIsProcessing(false);
+      setProcessingStatus('');
     }
   };
 
@@ -659,7 +454,22 @@ export default function App() {
                   {isProcessing ? (
                     <div className="h-full flex flex-col items-center justify-center text-[#00186E]/40 space-y-4 p-8">
                       <Loader2 className="w-10 h-10 animate-spin text-[#FFAD1D]" />
-                      <p className="text-sm font-medium animate-pulse font-sans-brand">Analyzing math content and generating LaTeX...</p>
+                      <p className="text-sm font-medium animate-pulse font-sans-brand">{processingStatus || 'Analyzing math content and generating LaTeX...'}</p>
+                      {/* Reasoning log */}
+                      {processingLog.length > 0 && (
+                        <div className="w-full max-w-md bg-[#00186E]/[0.03] rounded-lg border border-[#00186E]/10 p-3 max-h-40 overflow-y-auto text-left">
+                          <p className="text-[10px] font-semibold text-[#00186E]/40 uppercase tracking-wider mb-1.5 font-sans-brand">
+                            Agent reasoning
+                          </p>
+                          <div className="space-y-0.5">
+                            {processingLog.map((line, i) => (
+                              <p key={i} className="text-xs text-[#00186E]/50 font-sans-brand">
+                                {line}
+                              </p>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   ) : error ? (
                     <div className="p-6">
@@ -786,7 +596,9 @@ function DownloadImageButton({ imageDataUrl }: { imageDataUrl: string }) {
     const a = document.createElement('a');
     a.href = imageDataUrl;
     a.download = 'tikz-figure.png';
+    document.body.appendChild(a);
     a.click();
+    document.body.removeChild(a);
   };
 
   return (

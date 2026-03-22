@@ -311,6 +311,7 @@ export default function App() {
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [processingStatus, setProcessingStatus] = useState('');
+  const [processingLog, setProcessingLog] = useState<string[]>([]);
   const [result, setResult] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -391,6 +392,7 @@ export default function App() {
     setError(null);
     setResult(null);
     setProcessingStatus('Classifying image content...');
+    setProcessingLog([]);
 
     try {
       if (!apiKey) {
@@ -428,14 +430,21 @@ export default function App() {
       // Phase 2A: If geometric, run multi-agent TikZ pipeline
       if (hasGeometric) {
         setProcessingStatus('Running multi-agent TikZ generation...');
+        setProcessingLog((prev) => [...prev, 'Detected geometric figure — starting multi-agent pipeline']);
         try {
           const tikzResult = await generateTikzMultiAgent(
             apiKey,
             base64Data,
             mimeType || 'image/jpeg',
-            (_stage, detail) => setProcessingStatus(detail || _stage),
+            (_stage, detail) => {
+              setProcessingStatus(detail);
+              setProcessingLog((prev) => [...prev, detail]);
+            },
           );
           tikzPart = '```latex\n' + tikzResult.tikzCode + '\n```';
+          if (tikzResult.log.length > 0) {
+            setProcessingLog((prev) => [...prev, ...tikzResult.log]);
+          }
         } catch (tikzErr) {
           console.warn('Multi-agent TikZ failed, falling back to single-pass:', tikzErr);
           // Fallback to original single-pass approach for TikZ
@@ -728,6 +737,21 @@ export default function App() {
                     <div className="h-full flex flex-col items-center justify-center text-[#00186E]/40 space-y-4 p-8">
                       <Loader2 className="w-10 h-10 animate-spin text-[#FFAD1D]" />
                       <p className="text-sm font-medium animate-pulse font-sans-brand">{processingStatus || 'Analyzing math content and generating LaTeX...'}</p>
+                      {/* Reasoning log */}
+                      {processingLog.length > 0 && (
+                        <div className="w-full max-w-md bg-[#00186E]/[0.03] rounded-lg border border-[#00186E]/10 p-3 max-h-40 overflow-y-auto text-left">
+                          <p className="text-[10px] font-semibold text-[#00186E]/40 uppercase tracking-wider mb-1.5 font-sans-brand">
+                            Agent reasoning
+                          </p>
+                          <div className="space-y-0.5">
+                            {processingLog.map((line, i) => (
+                              <p key={i} className="text-xs text-[#00186E]/50 font-sans-brand">
+                                {line}
+                              </p>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   ) : error ? (
                     <div className="p-6">

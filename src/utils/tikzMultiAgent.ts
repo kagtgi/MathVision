@@ -1,262 +1,162 @@
 /**
  * Multi-Agent TikZ Generation Pipeline
  *
- * Uses multiple specialized Gemini agents to produce high-quality TikZ code
- * from images of geometric figures. Prioritizes correctness over token cost.
+ * Lean 3-phase architecture prioritizing correctness:
+ *   1. Describe  — natural-language inventory of every visible element
+ *   2. Generate  — 2 independent TikZ drafts in parallel
+ *   3. Verify+Fix — compare both drafts against the image, merge the best
+ *                   parts, fix errors, output final compilable code
  *
- * Pipeline:
- *   1. Analyzer Agent   — deeply describes every geometric element in the image
- *   2. Generator Agents — 3 independent generators produce TikZ candidates in parallel
- *   3. Judge Agent      — evaluates all candidates against the image, picks/synthesizes best
- *   4. Refiner Agent    — final correction pass on the chosen code
+ * All agents use gemini-pro-latest. Every agent sees the original image
+ * so nothing is lost in translation.
  */
 
 import { GoogleGenAI } from '@google/genai';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
-const TIKZ_MODEL = 'gemini-pro-latest';
-const ANALYSIS_TEMPERATURE = 0.1;
-const GENERATION_TEMPERATURE = 0.4; // moderate creativity for diversity across generators
-const JUDGE_TEMPERATURE = 0.1;
-const REFINE_TEMPERATURE = 0.1;
-const AGENT_TIMEOUT_MS = 120_000; // 2 minutes per agent call
+const MODEL = 'gemini-pro-latest';
+const AGENT_TIMEOUT_MS = 180_000; // 3 minutes
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 export interface TikzGenerationResult {
   tikzCode: string;
-  analysis: string;
+  description: string;
   candidates: string[];
-  selectedIndex: number;
-  judgeReasoning: string;
+  reasoning: string;
+  log: string[];           // step-by-step reasoning log for display
 }
 
 export interface TikzProgressCallback {
-  (stage: string, detail?: string): void;
+  (stage: string, detail: string): void;
 }
 
 // ─── Prompts ─────────────────────────────────────────────────────────────────
 
-const ANALYZER_PROMPT = `You are a precision geometry analyzer. Your job is to deeply analyze an image of a geometric figure and produce an exhaustive, structured description that another agent can use to generate perfect TikZ code.
+const DESCRIBE_PROMPT = `Look at this image carefully. List every visible geometric element. Be precise and exhaustive — do not invent anything that is not visible, and do not omit anything that is.
 
-Analyze the image and output a JSON object with this structure:
-{
-  "figureType": "triangle | quadrilateral | circle | coordinate_system | function_graph | composite | other",
-  "description": "One-sentence summary of the figure",
-  "boundingBox": { "estimatedWidth": number, "estimatedHeight": number, "aspectRatio": number },
-  "points": [
-    {
-      "label": "A",
-      "position": { "x": number, "y": number },
-      "anchor": "below left | above | right | ...",
-      "isCenter": false,
-      "notes": "optional special role like midpoint, foot of altitude, etc."
-    }
-  ],
-  "segments": [
-    {
-      "from": "A", "to": "B",
-      "style": "solid | dashed | dotted | thick",
-      "hasArrow": false,
-      "tickMarks": 0,
-      "label": null,
-      "notes": ""
-    }
-  ],
-  "angles": [
-    {
-      "vertex": "B",
-      "from": "A",
-      "to": "C",
-      "isRightAngle": false,
-      "label": "α",
-      "value": "60°",
-      "notes": ""
-    }
-  ],
-  "circles": [
-    {
-      "center": "O",
-      "radiusValue": 2.5,
-      "radiusLabel": "R",
-      "style": "solid",
-      "notes": ""
-    }
-  ],
-  "arcs": [
-    {
-      "center": "O",
-      "startAngle": 30,
-      "endAngle": 150,
-      "radius": 2,
-      "label": "",
-      "notes": ""
-    }
-  ],
-  "axes": {
-    "hasXAxis": false,
-    "hasYAxis": false,
-    "xRange": [-1, 5],
-    "yRange": [-1, 5],
-    "gridLines": false,
-    "tickLabels": true
-  },
-  "curves": [
-    {
-      "type": "function | parametric | freehand",
-      "expression": "x^2/4",
-      "domain": [0, 4],
-      "style": "solid",
-      "label": "y = f(x)",
-      "notes": ""
-    }
-  ],
-  "filledRegions": [
-    {
-      "vertices": ["A", "B", "C"],
-      "style": "gray!20 | pattern=north east lines",
-      "notes": ""
-    }
-  ],
-  "textAnnotations": [
-    {
-      "text": "any text labels not associated with points",
-      "position": { "x": 3, "y": 4 },
-      "notes": ""
-    }
-  ],
-  "symmetries": "any mirror/rotational symmetry observed",
-  "specialProperties": "parallel lines, perpendicular lines, equal segments, tangent lines, etc.",
-  "coordinateEstimates": "Describe how you estimated the coordinate positions based on visual proportions"
-}
+Write a numbered inventory using this format:
 
-CRITICAL RULES:
-- Estimate coordinates carefully based on visual proportions. Place the figure in a [0,6] × [0,6] region.
-- Identify ALL labeled points, segments, angles, and their relationships.
-- Note equal segments (tick marks), right angles (square corner marks), parallel lines (arrow marks).
-- Note dashed vs solid lines, thick vs thin lines, arrows on lines.
-- Note any shading, hatching, or filled regions.
-- If you see Vietnamese text labels, include them exactly as shown.
-- Be exhaustive — missing a single element will cause errors in the generated TikZ.
-- Output ONLY the JSON object, no markdown, no explanation.`;
+1. POINTS: List every labeled point with its approximate position described relative to the figure (e.g. "A is at the bottom-left vertex of the triangle"). Include the label exactly as shown.
 
-const makeGeneratorPrompt = (index: number) => `You are TikZ Generator #${index + 1}, an expert at writing compilable TikZ code for geometric figures.
+2. SEGMENTS/LINES: List every line segment, ray, or line. For each one state:
+   - endpoints (e.g. "segment from A to B")
+   - style: solid, dashed, dotted, or thick
+   - any arrowheads
+   - any tick marks indicating equal length (single tick, double tick, etc.)
 
-You will receive:
-1. An image of a geometric figure
-2. A structured analysis of the figure (JSON)
+3. ANGLES: List every marked angle. For each one state:
+   - the three points defining it (vertex in the middle, e.g. "angle ABC with vertex B")
+   - whether it has a right-angle square mark
+   - any arc drawn to mark the angle
+   - any label or value shown (e.g. "α", "60°")
 
-Your job: produce COMPLETE, COMPILABLE TikZ code that faithfully reproduces the figure.
+4. CIRCLES/ARCS: List any circles or arcs with center, radius information, and style.
 
-REQUIRED STRUCTURE:
-\`\`\`
-% Required packages: \\usepackage{tikz}
-% \\usetikzlibrary{angles, quotes, calc, arrows.meta, decorations.markings, positioning, intersections, patterns}
+5. AXES/GRIDS: If a coordinate system is present, describe the axes, tick marks, labels, and range.
+
+6. CURVES: Any function graphs or freehand curves — describe shape and any labels.
+
+7. SHADING/FILL: Any filled or hatched regions.
+
+8. TEXT: Any text labels or annotations not associated with points.
+
+9. PROPORTIONS: Describe the overall aspect ratio and how points are positioned relative to each other (e.g. "the triangle is roughly equilateral", "B is directly below C", "H is on segment BC about one-third from B").
+
+Rules:
+- Only describe what you actually see. Never guess or assume hidden elements.
+- If a label is in Vietnamese, write it exactly as shown.
+- Be specific about positions: use relative language (left, right, above, below, midpoint, one-third, etc.)`;
+
+const GENERATE_PROMPT = `You are a TikZ expert. You will receive an image of a geometric figure and a text description of its elements.
+
+Your task: write COMPLETE, COMPILABLE TikZ code that faithfully reproduces the figure.
+
+TEMPLATE — follow this structure exactly:
+% Required: \\usepackage{tikz}
+% \\usetikzlibrary{angles, quotes, calc, arrows.meta, decorations.markings}
 
 \\begin{tikzpicture}[scale=1]
-  % Define coordinates
-  ...
-  % Draw elements
-  ...
-  % Mark points and labels
-  ...
+  % --- Coordinates ---
+  \\coordinate (A) at (x, y);
+
+  % --- Draw segments/shapes ---
+  \\draw[thick] (A) -- (B) -- (C) -- cycle;
+
+  % --- Angle marks ---
+  \\pic[draw, angle radius=8pt] {angle = C--B--A};
+
+  % --- Right angle marks ---
+  \\pic[draw] {right angle = A--H--B};
+
+  % --- Equal-length tick marks ---
+  \\draw[decoration={markings, mark=at position 0.5 with {\\draw (0,-2pt) -- (0,2pt);}}, postaction={decorate}] (A) -- (B);
+
+  % --- Point labels ---
+  \\fill (A) circle (1.5pt); \\node[below left] at (A) {$A$};
 \\end{tikzpicture}
-\`\`\`
 
-MANDATORY RULES:
-1. Every named coordinate must be defined with \\coordinate before use
-2. Every labeled point gets: \\fill[black] (X) circle (1.5pt); \\node[anchor] at (X) {$X$};
-3. Use [thick] for main figure edges, [dashed] for construction/auxiliary lines
-4. Right angles: \\pic[draw] {right angle = A--H--B};
-5. Labeled angles: \\pic[draw, angle radius=8pt, "$\\alpha$", angle eccentricity=1.5] {angle = C--B--A};
-6. Equal segment tick marks: use decorations.markings with mark at position 0.5
-7. All math in nodes must be in $...$
-8. Fit figure in [0,6] × [0,6] region, use scale=1 by default
-9. Include ALL elements from the analysis — missing elements are failures
-10. Use calc library for midpoints: \\coordinate (M) at ($(A)!0.5!(B)$);
-11. Include comments explaining each section
-12. Code must compile with pdflatex + tikz + declared libraries
+RULES:
+1. Define \\coordinate for EVERY named point BEFORE using it.
+2. Use \\fill (X) circle (1.5pt) and \\node for every labeled point.
+3. Put all math labels inside $...$: {$A$}, {$60^\\circ$}.
+4. Use [thick] for main edges, [dashed] for construction lines.
+5. Use the angles library for angle arcs: \\pic[draw, angle radius=8pt, "$\\alpha$", angle eccentricity=1.5] {angle = C--B--A};
+6. Use right angle for 90° marks: \\pic[draw] {right angle = A--H--B};
+7. Use decorations.markings for equal-segment tick marks.
+8. Place coordinates in a [0,6]×[0,6] region. Match the proportions from the description.
+9. Declare only the tikzlibraries you actually use.
+10. The code MUST compile with pdflatex + tikz. Do not use undefined macros.
+11. Include EVERY element from the description. Do not skip anything.
+12. Do not add elements that are not in the description or image.
 
-${index === 0 ? 'Focus on GEOMETRIC PRECISION — get coordinates and proportions exactly right.' : ''}
-${index === 1 ? 'Focus on COMPLETENESS — ensure every single element from the analysis is included.' : ''}
-${index === 2 ? 'Focus on VISUAL FIDELITY — match the visual appearance (line styles, labels, spacing) as closely as possible.' : ''}
+Output ONLY the TikZ code. No explanation, no markdown fences.`;
 
-Output ONLY the TikZ code block. No explanation, no markdown formatting.`;
+const VERIFY_FIX_PROMPT = `You are a TikZ quality verifier. You receive:
+1. The original image of a geometric figure
+2. A description of what the figure contains
+3. Two candidate TikZ code drafts
 
-const JUDGE_PROMPT = `You are a TikZ code judge. You will receive:
-1. An image of a geometric figure
-2. The structured analysis of the figure
-3. Three candidate TikZ code blocks
+Your job has two parts:
 
-Your job: evaluate each candidate against the original image and analysis, then produce the BEST possible TikZ code.
+PART 1 — VERIFY (write your reasoning step by step):
+a) List every element from the description.
+b) For each element, check: is it present and correct in Draft A? In Draft B?
+c) Check each draft for compilation errors:
+   - Any \\coordinate used before being defined?
+   - Any undefined macros or missing libraries?
+   - Syntax errors (unmatched braces, missing semicolons)?
+d) Compare proportions: which draft better matches the image layout?
 
-EVALUATION CRITERIA (score each 1-10):
-1. **Geometric Accuracy**: Are coordinates, proportions, and positions correct?
-2. **Completeness**: Are ALL elements from the image included (points, segments, angles, labels, decorations)?
-3. **Compilability**: Will the code compile without errors? Are all coordinates defined before use? Are library calls correct?
-4. **Visual Fidelity**: Do line styles, thicknesses, colors, and label positions match the image?
-5. **Code Quality**: Clean structure, good comments, proper use of TikZ idioms?
+PART 2 — OUTPUT:
+Based on your verification, produce the FINAL TikZ code. You may:
+- Pick the better draft as-is if it is correct
+- Merge the best parts from both drafts
+- Fix any errors you found
 
-OUTPUT FORMAT (return ONLY this JSON, no markdown):
-{
-  "evaluation": [
-    {
-      "candidateIndex": 0,
-      "scores": { "accuracy": 8, "completeness": 7, "compilability": 9, "fidelity": 7, "quality": 8 },
-      "totalScore": 39,
-      "strengths": "...",
-      "weaknesses": "..."
-    },
-    {
-      "candidateIndex": 1,
-      "scores": { "accuracy": 9, "completeness": 9, "compilability": 8, "fidelity": 8, "quality": 7 },
-      "totalScore": 41,
-      "strengths": "...",
-      "weaknesses": "..."
-    },
-    {
-      "candidateIndex": 2,
-      "scores": { "accuracy": 7, "completeness": 8, "compilability": 9, "fidelity": 9, "quality": 8 },
-      "totalScore": 41,
-      "strengths": "...",
-      "weaknesses": "..."
-    }
-  ],
-  "selectedIndex": 1,
-  "reasoning": "Why this candidate was selected or how the best was synthesized",
-  "bestCode": "THE COMPLETE BEST TIKZ CODE HERE — either the selected candidate as-is, or a synthesized version combining the best parts of multiple candidates. Must be complete and compilable."
-}
+Your response MUST have exactly this format:
 
-CRITICAL:
-- The "bestCode" field must contain COMPLETE, COMPILABLE TikZ code
-- You may synthesize a new version combining strengths of multiple candidates
-- Fix any compilation errors you spot (undefined coordinates, missing libraries, syntax errors)
-- Ensure ALL elements from the analysis are present in the final code
-- If all candidates miss an element, ADD it in the bestCode`;
+REASONING:
+(your step-by-step analysis from Part 1 — be specific, reference exact lines)
 
-const REFINER_PROMPT = `You are a TikZ code refiner. You will receive:
-1. An image of a geometric figure
-2. TikZ code that was selected as the best candidate
+FINAL_CODE:
+% Required: \\usepackage{tikz}
+% \\usetikzlibrary{...}
 
-Your job: do a FINAL quality pass on the code, comparing it against the original image, and fix any remaining issues.
+\\begin{tikzpicture}[scale=1]
+...
+\\end{tikzpicture}
 
-CHECK AND FIX:
-1. **Missing elements**: Compare every visible element in the image against the code. Add anything missing.
-2. **Wrong positions**: Check if point positions match the visual proportions in the image. Adjust if needed.
-3. **Label placement**: Ensure labels don't overlap with lines or other labels. Adjust anchors.
-4. **Right angles**: Verify all right angles visible in the image have \\pic[draw] {right angle = ...}
-5. **Equal segments**: Verify tick marks on equal segments
-6. **Line styles**: Solid vs dashed vs dotted — must match the image exactly
-7. **Arrows**: Check if any lines/segments should have arrowheads
-8. **Angle arcs**: Verify all marked angles have proper arcs with labels
-9. **Compilability**: Ensure every \\coordinate is defined before use, all libraries are declared
-10. **Scale and proportions**: Figure should be well-proportioned and not cramped or oversized
+Rules:
+- The FINAL_CODE must be complete and compile with pdflatex.
+- Every element from the description must be present.
+- Do not add elements that are not in the image.
+- Do not hallucinate labels, points, or decorations that do not exist in the image.
+- If both drafts miss an element that IS in the description, add it yourself.
+- If both drafts include something NOT in the image, remove it.`;
 
-OUTPUT: Return ONLY the final refined TikZ code. No explanation, no markdown formatting, no code fences.
-Start directly with "% Required packages:" and end with "\\end{tikzpicture}".`;
-
-// ─── Helper Functions ────────────────────────────────────────────────────────
+// ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
   const timeout = new Promise<T>((_, reject) =>
@@ -266,51 +166,54 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
 }
 
 function extractTikzCode(text: string): string {
-  // Try to extract from code block
+  // From FINAL_CODE: marker
+  const finalCodeMatch = text.match(/FINAL_CODE:\s*\n([\s\S]*)/);
+  if (finalCodeMatch) {
+    const afterMarker = finalCodeMatch[1].trim();
+    // Extract tikzpicture from within
+    const envMatch = afterMarker.match(/((?:% Required[\s\S]*?)?\\begin\{tikzpicture\}[\s\S]*?\\end\{tikzpicture\})/);
+    if (envMatch) return envMatch[1].trim();
+    return afterMarker;
+  }
+
+  // From code block
   const codeBlockMatch = text.match(/```(?:latex|tex)?\s*\n?([\s\S]*?)\n?\s*```/);
-  if (codeBlockMatch) {
-    return codeBlockMatch[1].trim();
-  }
+  if (codeBlockMatch) return codeBlockMatch[1].trim();
 
-  // Try to find tikzpicture directly
-  const tikzMatch = text.match(/(% Required packages[\s\S]*?\\end\{tikzpicture\})/);
-  if (tikzMatch) {
-    return tikzMatch[1].trim();
-  }
+  // With header comment
+  const tikzMatch = text.match(/(% Required[\s\S]*?\\end\{tikzpicture\})/);
+  if (tikzMatch) return tikzMatch[1].trim();
 
-  // Try just the tikzpicture environment
+  // Just the environment
   const envMatch = text.match(/(\\begin\{tikzpicture\}[\s\S]*?\\end\{tikzpicture\})/);
-  if (envMatch) {
-    return envMatch[1].trim();
-  }
+  if (envMatch) return envMatch[1].trim();
 
-  // Return as-is if nothing matched
   return text.trim();
 }
 
-function extractJson(text: string): string {
-  const codeBlockMatch = text.match(/```(?:json)?\s*\n?([\s\S]*?)\n?\s*```/);
-  if (codeBlockMatch) {
-    return codeBlockMatch[1].trim();
-  }
-  const jsonMatch = text.match(/\{[\s\S]*\}/);
-  if (jsonMatch) {
-    return jsonMatch[0].trim();
-  }
-  return text.trim();
+function extractReasoning(text: string): string {
+  const match = text.match(/REASONING:\s*\n([\s\S]*?)(?=\nFINAL_CODE:)/);
+  if (match) return match[1].trim();
+  // If no marker, take everything before tikzpicture
+  const beforeCode = text.match(/([\s\S]*?)(?=% Required|\\begin\{tikzpicture\})/);
+  if (beforeCode && beforeCode[1].trim().length > 20) return beforeCode[1].trim();
+  return '';
 }
 
-// ─── Multi-Agent Pipeline ────────────────────────────────────────────────────
+function callModel(
+  ai: GoogleGenAI,
+  parts: Array<{ text: string } | { inlineData: { data: string; mimeType: string } }>,
+  temperature: number,
+) {
+  return ai.models.generateContent({
+    model: MODEL,
+    contents: [{ role: 'user', parts }],
+    config: { temperature },
+  });
+}
 
-/**
- * Run the full multi-agent TikZ generation pipeline.
- *
- * @param apiKey      Gemini API key
- * @param imageBase64 Base64-encoded image data (without data URL prefix)
- * @param mimeType    Image MIME type (e.g. "image/jpeg")
- * @param onProgress  Optional callback for progress updates
- * @returns           TikzGenerationResult with the final TikZ code and metadata
- */
+// ─── Pipeline ────────────────────────────────────────────────────────────────
+
 export async function generateTikzMultiAgent(
   apiKey: string,
   imageBase64: string,
@@ -318,189 +221,140 @@ export async function generateTikzMultiAgent(
   onProgress?: TikzProgressCallback,
 ): Promise<TikzGenerationResult> {
   const ai = new GoogleGenAI({ apiKey });
+  const img = { inlineData: { data: imageBase64, mimeType } };
+  const log: string[] = [];
 
-  const imageInlineData = {
-    inlineData: { data: imageBase64, mimeType },
-  };
+  // ── Phase 1: Describe ──────────────────────────────────────────────────────
 
-  // ── Phase 1: Analysis ──────────────────────────────────────────────────────
+  onProgress?.('describe', 'Analyzing the figure — identifying every element...');
+  log.push('Step 1: Describing every visible element in the image...');
 
-  onProgress?.('analysis', 'Deeply analyzing the geometric figure...');
-
-  const analysisResponse = await withTimeout(
-    ai.models.generateContent({
-      model: TIKZ_MODEL,
-      contents: [{
-        role: 'user',
-        parts: [
-          { text: ANALYZER_PROMPT },
-          imageInlineData,
-          { text: 'Analyze this geometric figure image. Output ONLY the JSON analysis.' },
-        ],
-      }],
-      config: { temperature: ANALYSIS_TEMPERATURE },
-    }),
+  const descResponse = await withTimeout(
+    callModel(ai, [{ text: DESCRIBE_PROMPT }, img], 0.1),
     AGENT_TIMEOUT_MS,
-    'Analyzer Agent',
+    'Describer',
   );
 
-  const analysisText = analysisResponse.text || '';
-  const analysisJson = extractJson(analysisText);
-
-  // Validate that we got valid JSON analysis
-  let parsedAnalysis: Record<string, unknown>;
-  try {
-    parsedAnalysis = JSON.parse(analysisJson);
-  } catch {
-    // If analysis failed to parse, still continue — generators get the raw text
-    parsedAnalysis = { raw: analysisText };
+  const description = descResponse.text || '';
+  if (!description || description.length < 30) {
+    throw new Error('Failed to describe the figure. The image may not contain a geometric diagram.');
   }
 
-  const analysisForGenerators = JSON.stringify(parsedAnalysis, null, 2);
+  // Count elements found for the log
+  const pointCount = (description.match(/\b[A-Z]\b(?=\s+is\b|\s+at\b)/g) || []).length;
+  log.push(`Found description with ~${pointCount} labeled points.`);
 
-  // ── Phase 2: Parallel Generation ───────────────────────────────────────────
+  // ── Phase 2: Generate (2 drafts in parallel) ──────────────────────────────
 
-  onProgress?.('generation', 'Generating 3 TikZ candidates in parallel...');
+  onProgress?.('generate', 'Writing two independent TikZ drafts...');
+  log.push('Step 2: Generating two independent TikZ code drafts...');
 
-  const generatorPromises = [0, 1, 2].map(async (index) => {
+  const genPromises = [0, 1].map(async (i) => {
     try {
-      const response = await withTimeout(
-        ai.models.generateContent({
-          model: TIKZ_MODEL,
-          contents: [{
-            role: 'user',
-            parts: [
-              { text: makeGeneratorPrompt(index) },
-              imageInlineData,
-              { text: `Here is the structured analysis of this figure:\n\n${analysisForGenerators}\n\nGenerate the TikZ code now. Output ONLY the TikZ code.` },
-            ],
-          }],
-          config: { temperature: GENERATION_TEMPERATURE },
-        }),
+      const resp = await withTimeout(
+        callModel(
+          ai,
+          [
+            { text: GENERATE_PROMPT },
+            img,
+            { text: `DESCRIPTION OF THE FIGURE:\n${description}\n\nWrite the TikZ code now. Output ONLY the code.` },
+          ],
+          i === 0 ? 0.15 : 0.4, // draft A is conservative, draft B has more variation
+        ),
         AGENT_TIMEOUT_MS,
-        `Generator #${index + 1}`,
+        `Generator ${String.fromCharCode(65 + i)}`,
       );
-      return extractTikzCode(response.text || '');
+      return extractTikzCode(resp.text || '');
     } catch (err) {
-      console.warn(`Generator #${index + 1} failed:`, err);
+      console.warn(`Generator ${String.fromCharCode(65 + i)} failed:`, err);
       return null;
     }
   });
 
-  const candidateResults = await Promise.all(generatorPromises);
-  const candidates = candidateResults.filter((c): c is string => c !== null && c.length > 0);
+  const results = await Promise.all(genPromises);
+  const candidates = results.filter((c): c is string =>
+    c !== null && c.length > 0 && c.includes('\\begin{tikzpicture}'),
+  );
 
   if (candidates.length === 0) {
-    throw new Error('All TikZ generators failed. Please try again.');
+    throw new Error('Both TikZ generators failed. Please try again.');
   }
 
-  // If only one candidate, skip judging and go straight to refinement
+  log.push(`Got ${candidates.length} valid draft${candidates.length > 1 ? 's' : ''}.`);
+
+  // If only one candidate, still run verify to catch errors
   if (candidates.length === 1) {
-    onProgress?.('refinement', 'Refining the TikZ code...');
-    const refined = await runRefiner(ai, imageInlineData, candidates[0]);
+    candidates.push(candidates[0]); // duplicate so verify can still work
+  }
+
+  // ── Phase 3: Verify + Fix ─────────────────────────────────────────────────
+
+  onProgress?.('verify', 'Verifying drafts against image — checking every element...');
+  log.push('Step 3: Verifying both drafts against the image and description...');
+
+  const draftText = candidates
+    .map((code, i) => `=== DRAFT ${String.fromCharCode(65 + i)} ===\n${code}`)
+    .join('\n\n');
+
+  const verifyResponse = await withTimeout(
+    callModel(
+      ai,
+      [
+        { text: VERIFY_FIX_PROMPT },
+        img,
+        {
+          text: `DESCRIPTION:\n${description}\n\n${draftText}\n\nVerify and produce the final code.`,
+        },
+      ],
+      0.1,
+    ),
+    AGENT_TIMEOUT_MS,
+    'Verifier',
+  );
+
+  const verifyText = verifyResponse.text || '';
+  const reasoning = extractReasoning(verifyText);
+  const finalCode = extractTikzCode(verifyText);
+
+  if (reasoning) {
+    // Extract key findings for the log
+    const lines = reasoning.split('\n').filter((l) => l.trim().length > 0);
+    const summary = lines.slice(0, 5).map((l) => l.trim());
+    log.push('Verification findings:');
+    for (const s of summary) {
+      log.push(`  ${s}`);
+    }
+    if (lines.length > 5) {
+      log.push(`  ... and ${lines.length - 5} more checks.`);
+    }
+  }
+
+  if (!finalCode.includes('\\begin{tikzpicture}')) {
+    // Verifier failed to produce code — use best candidate
+    log.push('Verifier did not produce valid code. Using best draft directly.');
     return {
-      tikzCode: refined,
-      analysis: analysisForGenerators,
+      tikzCode: candidates[0],
+      description,
       candidates,
-      selectedIndex: 0,
-      judgeReasoning: 'Only one candidate was available.',
+      reasoning: reasoning || 'Verification produced no code; using draft A.',
+      log,
     };
   }
 
-  // ── Phase 3: Judging ───────────────────────────────────────────────────────
-
-  onProgress?.('judging', `Evaluating ${candidates.length} candidates...`);
-
-  const candidateText = candidates
-    .map((code, i) => `=== CANDIDATE ${i + 1} ===\n${code}\n`)
-    .join('\n');
-
-  const judgeResponse = await withTimeout(
-    ai.models.generateContent({
-      model: TIKZ_MODEL,
-      contents: [{
-        role: 'user',
-        parts: [
-          { text: JUDGE_PROMPT },
-          imageInlineData,
-          { text: `ANALYSIS:\n${analysisForGenerators}\n\nCANDIDATES:\n${candidateText}\n\nEvaluate and output the JSON result.` },
-        ],
-      }],
-      config: { temperature: JUDGE_TEMPERATURE },
-    }),
-    AGENT_TIMEOUT_MS,
-    'Judge Agent',
-  );
-
-  const judgeText = judgeResponse.text || '';
-  let selectedCode: string;
-  let selectedIndex = 0;
-  let judgeReasoning = '';
-
-  try {
-    const judgeJson = JSON.parse(extractJson(judgeText));
-    selectedIndex = judgeJson.selectedIndex ?? 0;
-    judgeReasoning = judgeJson.reasoning ?? '';
-    selectedCode = judgeJson.bestCode
-      ? extractTikzCode(judgeJson.bestCode)
-      : candidates[selectedIndex] || candidates[0];
-  } catch {
-    // If judge JSON parsing fails, take the first candidate
-    selectedCode = candidates[0];
-    judgeReasoning = 'Judge output could not be parsed; using first candidate.';
-  }
-
-  // ── Phase 4: Refinement ────────────────────────────────────────────────────
-
-  onProgress?.('refinement', 'Final refinement pass...');
-
-  const refinedCode = await runRefiner(ai, imageInlineData, selectedCode);
-
-  onProgress?.('complete', 'TikZ generation complete!');
+  log.push('Final TikZ code produced successfully.');
+  onProgress?.('complete', 'TikZ generation complete.');
 
   return {
-    tikzCode: refinedCode,
-    analysis: analysisForGenerators,
+    tikzCode: finalCode,
+    description,
     candidates,
-    selectedIndex,
-    judgeReasoning,
+    reasoning,
+    log,
   };
 }
 
-async function runRefiner(
-  ai: GoogleGenAI,
-  imageInlineData: { inlineData: { data: string; mimeType: string } },
-  code: string,
-): Promise<string> {
-  try {
-    const response = await withTimeout(
-      ai.models.generateContent({
-        model: TIKZ_MODEL,
-        contents: [{
-          role: 'user',
-          parts: [
-            { text: REFINER_PROMPT },
-            imageInlineData,
-            { text: `Here is the TikZ code to refine:\n\n${code}\n\nCompare against the image and output the final refined TikZ code ONLY.` },
-          ],
-        }],
-        config: { temperature: REFINE_TEMPERATURE },
-      }),
-      AGENT_TIMEOUT_MS,
-      'Refiner Agent',
-    );
-    const refined = extractTikzCode(response.text || '');
-    // If refiner produced valid output, use it; otherwise keep the input
-    return refined.includes('\\begin{tikzpicture}') ? refined : code;
-  } catch {
-    // Refinement failed — return the unrefined code
-    return code;
-  }
-}
-
 /**
- * Quick single-agent TikZ generation (fallback for non-geometric images or
- * when speed is preferred over quality).
+ * Single-agent fallback — one direct generation pass.
  */
 export async function generateTikzSingleAgent(
   apiKey: string,
@@ -510,23 +364,20 @@ export async function generateTikzSingleAgent(
   const ai = new GoogleGenAI({ apiKey });
 
   try {
-    const response = await withTimeout(
-      ai.models.generateContent({
-        model: TIKZ_MODEL,
-        contents: [{
-          role: 'user',
-          parts: [
-            { text: makeGeneratorPrompt(0) },
-            { inlineData: { data: imageBase64, mimeType } },
-            { text: 'Generate TikZ code for this figure. Use a dummy analysis — focus on visual reproduction. Output ONLY the TikZ code.' },
-          ],
-        }],
-        config: { temperature: 0.2 },
-      }),
+    const resp = await withTimeout(
+      callModel(
+        ai,
+        [
+          { text: GENERATE_PROMPT },
+          { inlineData: { data: imageBase64, mimeType } },
+          { text: 'Look at this image and write complete, compilable TikZ code that reproduces it. Output ONLY the TikZ code.' },
+        ],
+        0.2,
+      ),
       AGENT_TIMEOUT_MS,
-      'Single TikZ Generator',
+      'Single Generator',
     );
-    const code = extractTikzCode(response.text || '');
+    const code = extractTikzCode(resp.text || '');
     return code.includes('\\begin{tikzpicture}') ? code : null;
   } catch {
     return null;

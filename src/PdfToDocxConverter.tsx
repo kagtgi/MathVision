@@ -776,6 +776,7 @@ export default function PdfToDocxConverter({ apiKey }: { apiKey: string }) {
   const [pdfFile, setPdfFile] = useState<File | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [progress, setProgress] = useState({ current: 0, total: 0, status: '' });
+  const [reasoningLog, setReasoningLog] = useState<string[]>([]);
   const [documentContent, setDocumentContent] = useState<PageContent[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isGeneratingDocx, setIsGeneratingDocx] = useState(false);
@@ -813,6 +814,7 @@ export default function PdfToDocxConverter({ apiKey }: { apiKey: string }) {
     setIsProcessing(true);
     setError(null);
     setDocumentContent(null);
+    setReasoningLog([]);
     pageCanvasesRef.current.clear();
 
     try {
@@ -922,6 +924,7 @@ export default function PdfToDocxConverter({ apiKey }: { apiKey: string }) {
 
           // Attempt 1: full multi-agent pipeline
           let tikzSuccess = false;
+          setReasoningLog((prev) => [...prev, `── Page ${pageNum}, ${figLabel} ──`]);
           try {
             const result = await generateTikzMultiAgent(
               apiKey,
@@ -931,29 +934,45 @@ export default function PdfToDocxConverter({ apiKey }: { apiKey: string }) {
                 setProgress({
                   current: pageNum,
                   total: totalPages,
-                  status: `Page ${pageNum} ${figLabel}: ${detail || stage}`,
+                  status: `Page ${pageNum} ${figLabel}: ${detail}`,
                 });
+                setReasoningLog((prev) => [...prev, detail]);
               },
             );
 
             el.tikz = result.tikzCode;
 
+            // Append agent reasoning to visible log
+            if (result.log.length > 0) {
+              setReasoningLog((prev) => [...prev, ...result.log]);
+            }
+
             // Compile TikZ to image
+            setProgress({
+              current: pageNum,
+              total: totalPages,
+              status: `Page ${pageNum} ${figLabel}: compiling TikZ to image...`,
+            });
             const tikzResult = await tikzToImage(result.tikzCode);
             if (tikzResult) {
               el.tikzImage = tikzResult;
               tikzSuccess = true;
+              setReasoningLog((prev) => [...prev, 'TikZ compiled to image successfully.']);
+            } else {
+              setReasoningLog((prev) => [...prev, 'TikZ browser compilation returned empty — will retry.']);
             }
           } catch (tikzErr) {
-            console.warn(`Multi-agent TikZ generation failed for ${figLabel}:`, tikzErr);
+            const msg = tikzErr instanceof Error ? tikzErr.message : String(tikzErr);
+            console.warn(`Multi-agent TikZ failed for ${figLabel}:`, tikzErr);
+            setReasoningLog((prev) => [...prev, `Multi-agent pipeline failed: ${msg}. Retrying...`]);
           }
 
-          // Attempt 2: if multi-agent failed or compilation failed, retry with a single focused agent
+          // Attempt 2: single-agent fallback
           if (!tikzSuccess) {
             setProgress({
               current: pageNum,
               total: totalPages,
-              status: `Page ${pageNum} ${figLabel}: retrying TikZ generation...`,
+              status: `Page ${pageNum} ${figLabel}: retrying with single agent...`,
             });
 
             try {
@@ -963,10 +982,11 @@ export default function PdfToDocxConverter({ apiKey }: { apiKey: string }) {
                 const tikzResult = await tikzToImage(singleCode);
                 if (tikzResult) {
                   el.tikzImage = tikzResult;
+                  setReasoningLog((prev) => [...prev, 'Single-agent fallback succeeded.']);
                 }
               }
             } catch {
-              // Single agent also failed — tikz code may still exist for reference
+              setReasoningLog((prev) => [...prev, 'Single-agent fallback also failed.']);
             }
           }
         }
@@ -1058,6 +1078,7 @@ export default function PdfToDocxConverter({ apiKey }: { apiKey: string }) {
     setShowViewer(false);
     setIsProcessing(false);
     setProgress({ current: 0, total: 0, status: '' });
+    setReasoningLog([]);
     pageCanvasesRef.current.clear();
   };
 
@@ -1136,9 +1157,9 @@ export default function PdfToDocxConverter({ apiKey }: { apiKey: string }) {
 
                   {/* Progress */}
                   {isProcessing && (
-                    <div className="space-y-2">
+                    <div className="space-y-3">
                       <div className="flex items-center gap-2 text-sm text-[#00186E]/70 font-sans-brand">
-                        <Loader2 className="w-4 h-4 animate-spin text-[#FFAD1D]" />
+                        <Loader2 className="w-4 h-4 animate-spin text-[#FFAD1D] shrink-0" />
                         {progress.status}
                       </div>
                       {progress.total > 0 && (
@@ -1149,6 +1170,30 @@ export default function PdfToDocxConverter({ apiKey }: { apiKey: string }) {
                               width: `${(progress.current / progress.total) * 100}%`,
                             }}
                           />
+                        </div>
+                      )}
+                      {/* Reasoning log — shows agent step-by-step thinking */}
+                      {reasoningLog.length > 0 && (
+                        <div className="bg-[#00186E]/[0.03] rounded-lg border border-[#00186E]/10 p-3 max-h-48 overflow-y-auto">
+                          <p className="text-[10px] font-semibold text-[#00186E]/40 uppercase tracking-wider mb-1.5 font-sans-brand">
+                            Agent reasoning
+                          </p>
+                          <div className="space-y-0.5">
+                            {reasoningLog.map((line, i) => (
+                              <p
+                                key={i}
+                                className={`text-xs font-sans-brand ${
+                                  line.startsWith('──')
+                                    ? 'text-[#00186E]/60 font-semibold mt-1'
+                                    : line.startsWith('  ')
+                                      ? 'text-[#00186E]/40 pl-2'
+                                      : 'text-[#00186E]/50'
+                                }`}
+                              >
+                                {line}
+                              </p>
+                            ))}
+                          </div>
                         </div>
                       )}
                     </div>

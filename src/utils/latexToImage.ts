@@ -22,6 +22,8 @@ function getReusableCanvas(width: number, height: number): { canvas: HTMLCanvasE
   _reusableCanvas.width = width;
   _reusableCanvas.height = height;
   const ctx = _reusableCanvas.getContext('2d', { willReadFrequently: false })!;
+  // Clear any previous content to prevent ghosting artifacts
+  ctx.clearRect(0, 0, width, height);
   return { canvas: _reusableCanvas, ctx };
 }
 

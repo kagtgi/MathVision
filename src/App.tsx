@@ -508,18 +508,19 @@ function ResultRenderer({ content }: { content: string }) {
         remarkPlugins={[remarkGfm, remarkMath]}
         rehypePlugins={[rehypeKatex]}
         components={{
-          code({ node, inline, className, children, ...props }: any) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          code(props: any) {
+            const { className, children } = props;
             const match = /language-(\w+)/.exec(className || '');
-            const isCodeBlock = !inline && match;
-            
-            if (isCodeBlock) {
+
+            if (match) {
               return (
                 <CodeBlock language={match[1]} code={String(children).replace(/\n$/, '')} />
               );
             }
-            
+
             return (
-              <code className="bg-[#00186E]/5 text-[#00186E] px-1.5 py-0.5 rounded-md font-mono text-xs" {...props}>
+              <code className="bg-[#00186E]/5 text-[#00186E] px-1.5 py-0.5 rounded-md font-mono text-xs">
                 {children}
               </code>
             );
@@ -736,19 +737,38 @@ function CodeBlock({ language, code }: { language: string, code: string }) {
   );
 }
 
+const TIKZ_IFRAME_TIMEOUT_MS = 30000; // Max 30s for TikZ rendering in iframe
+
 function TikzRendererWithRef({ code, onImageReady }: { code: string, onImageReady?: (dataUrl: string | null) => void }) {
   const [pngDataUrl, setPngDataUrl] = useState<string | null>(null);
   const [isRendering, setIsRendering] = useState(true);
+  const [renderError, setRenderError] = useState(false);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const idRef = useRef(Math.random().toString(36).slice(2));
 
   useEffect(() => {
+    let settled = false;
+
+    // Timeout guard: if TikZJax never renders, fail gracefully
+    const timeoutId = setTimeout(() => {
+      if (!settled) {
+        settled = true;
+        setIsRendering(false);
+        setRenderError(true);
+        onImageReady?.(null);
+      }
+    }, TIKZ_IFRAME_TIMEOUT_MS);
+
     const handler = (e: MessageEvent) => {
       if (e.data?.tikzId !== idRef.current) return;
-      const iframe = iframeRef.current;
-      if (!iframe) return;
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeoutId);
 
-      // Use rAF instead of fixed 500ms delay for faster rendering
+      const iframe = iframeRef.current;
+      if (!iframe) { setIsRendering(false); onImageReady?.(null); return; }
+
+      // Use rAF instead of fixed delay for faster rendering
       requestAnimationFrame(() => {
         const svgEl = iframe.contentDocument?.querySelector('svg');
         if (!svgEl) { setIsRendering(false); onImageReady?.(null); return; }
@@ -781,7 +801,10 @@ function TikzRendererWithRef({ code, onImageReady }: { code: string, onImageRead
       });
     };
     window.addEventListener('message', handler);
-    return () => window.removeEventListener('message', handler);
+    return () => {
+      window.removeEventListener('message', handler);
+      clearTimeout(timeoutId);
+    };
   }, [onImageReady]);
 
   const tikzId = idRef.current;
@@ -813,7 +836,9 @@ function TikzRendererWithRef({ code, onImageReady }: { code: string, onImageRead
         <img src={pngDataUrl} alt="TikZ figure" className="max-w-full h-auto" />
       ) : (
         <div className="flex items-center justify-center w-full h-48 text-red-400">
-          <span className="text-sm font-sans-brand">Failed to render figure</span>
+          <span className="text-sm font-sans-brand">
+            {renderError ? 'Rendering timed out — TikZ code may be invalid' : 'Failed to render figure'}
+          </span>
         </div>
       )}
     </div>

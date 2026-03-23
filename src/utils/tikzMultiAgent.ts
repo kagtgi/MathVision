@@ -22,10 +22,9 @@ const AGENT_TIMEOUT_MS = 120_000; // 2 minutes (reduced from 3 — Gemini Pro ra
 
 export interface TikzGenerationResult {
   tikzCode: string;
-  description: string;
   candidates: string[];
   reasoning: string;
-  log: string[];           // step-by-step reasoning log for display
+  log: string[];
 }
 
 export interface TikzProgressCallback {
@@ -167,9 +166,9 @@ export async function generateTikzMultiAgent(
   apiKey: string,
   imageBase64: string,
   mimeType: string,
-  onProgress?: TikzProgressCallback,
-  draftA?: string,
+  options?: { onProgress?: TikzProgressCallback; draftA?: string },
 ): Promise<TikzGenerationResult> {
+  const { onProgress, draftA } = options ?? {};
   const ai = new GoogleGenAI({ apiKey });
   const img = { inlineData: { data: imageBase64, mimeType } };
   const log: string[] = [];
@@ -247,7 +246,6 @@ export async function generateTikzMultiAgent(
     onProgress?.('complete', 'TikZ generation complete.');
     return {
       tikzCode: candidates[0],
-      description: '',
       candidates,
       reasoning: 'Single draft — no verification needed.',
       log,
@@ -295,7 +293,6 @@ export async function generateTikzMultiAgent(
     log.push('Verifier did not produce valid code. Using best draft directly.');
     return {
       tikzCode: candidates[0],
-      description: '',
       candidates,
       reasoning: reasoning || 'Verification produced no code; using draft A.',
       log,

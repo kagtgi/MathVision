@@ -959,13 +959,15 @@ export default function PdfToDocxConverter({ apiKey }: { apiKey: string }) {
               apiKey,
               cropBase64,
               'image/png',
-              (stage, detail) => {
-                setProgress({
-                  current: pageNum,
-                  total: totalPages,
-                  status: `Page ${pageNum} ${figLabel}: ${detail}`,
-                });
-                setReasoningLog((prev) => [...prev, detail]);
+              {
+                onProgress: (stage, detail) => {
+                  setProgress({
+                    current: pageNum,
+                    total: totalPages,
+                    status: `Page ${pageNum} ${figLabel}: ${detail}`,
+                  });
+                  setReasoningLog((prev) => [...prev, detail]);
+                },
               },
             );
 

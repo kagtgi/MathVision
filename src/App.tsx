@@ -9,6 +9,7 @@ import rehypeKatex from 'rehype-katex';
 import { motion } from 'framer-motion';
 import PdfToDocxConverter from './PdfToDocxConverter';
 import { generateTikzMultiAgent, extractTikzCode } from './utils/tikzMultiAgent';
+import { waitForTikzSvg, getReusableCanvas } from './utils/latexToImage';
 import { GEMINI_MODEL, LATEX_MATH_RULES, ANTI_HALLUCINATION, OUTPUT_FORMAT_RULES } from './utils/sharedPrompts';
 
 type AppMode = 'image-to-latex' | 'pdf-to-docx';
@@ -201,11 +202,13 @@ export default function App() {
             apiKey,
             base64Data,
             mimeType || 'image/jpeg',
-            (_stage, detail) => {
-              setProcessingStatus(detail);
-              setProcessingLog((prev) => [...prev, detail]);
+            {
+              onProgress: (_stage, detail) => {
+                setProcessingStatus(detail);
+                setProcessingLog((prev) => [...prev, detail]);
+              },
+              draftA: initialDraftA,
             },
-            initialDraftA,
           );
 
           if (tikzResult.log.length > 0) {
@@ -744,58 +747,19 @@ function CodeBlock({ language, code }: { language: string, code: string }) {
   );
 }
 
-const TIKZ_DOM_TIMEOUT_MS = 15_000; // 15s — TikZJax already loaded on main page, no re-download
+const TIKZ_DOM_TIMEOUT_MS = 15_000; // TikZJax already loaded on main page, no re-download
 
 function TikzRendererWithRef({ code, onImageReady }: { code: string, onImageReady?: (dataUrl: string | null) => void }) {
   const [pngDataUrl, setPngDataUrl] = useState<string | null>(null);
   const [isRendering, setIsRendering] = useState(true);
   const [renderError, setRenderError] = useState(false);
-  const containerRef = useRef<HTMLDivElement>(null);
+  const onImageReadyRef = useRef(onImageReady);
+  onImageReadyRef.current = onImageReady;
 
   useEffect(() => {
-    let settled = false;
-    let observer: MutationObserver | null = null;
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    let renderDiv: HTMLDivElement | null = null;
+    let cancelled = false;
 
-    const finish = (dataUrl: string | null, isTimeout = false) => {
-      if (settled) return;
-      settled = true;
-      if (observer) observer.disconnect();
-      if (timer) clearTimeout(timer);
-      setPngDataUrl(dataUrl);
-      setIsRendering(false);
-      if (isTimeout && !dataUrl) setRenderError(true);
-      onImageReady?.(dataUrl);
-    };
-
-    const convertSvgToPng = (svgEl: SVGSVGElement) => {
-      const svgClone = svgEl.cloneNode(true) as SVGElement;
-      if (!svgClone.getAttribute('xmlns')) svgClone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
-      const svgData = new XMLSerializer().serializeToString(svgClone);
-      const svgBlob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
-      const url = URL.createObjectURL(svgBlob);
-
-      const img = new Image();
-      img.onload = () => {
-        const scale = 2;
-        const canvas = document.createElement('canvas');
-        canvas.width = img.width * scale;
-        canvas.height = img.height * scale;
-        const ctx = canvas.getContext('2d')!;
-        ctx.fillStyle = 'white';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        ctx.scale(scale, scale);
-        ctx.drawImage(img, 0, 0);
-        URL.revokeObjectURL(url);
-        finish(canvas.toDataURL('image/png'));
-      };
-      img.onerror = () => { URL.revokeObjectURL(url); finish(null); };
-      img.src = url;
-    };
-
-    // Render in main DOM — reuses the already-loaded TikZJax (no iframe re-download)
-    renderDiv = document.createElement('div');
+    const renderDiv = document.createElement('div');
     renderDiv.style.position = 'absolute';
     renderDiv.style.left = '-9999px';
     renderDiv.style.top = '-9999px';
@@ -807,35 +771,52 @@ function TikzRendererWithRef({ code, onImageReady }: { code: string, onImageRead
     script.textContent = code;
     renderDiv.appendChild(script);
 
-    // Timeout guard
-    timer = setTimeout(() => finish(null, true), TIKZ_DOM_TIMEOUT_MS);
-
-    // Watch for TikZJax to replace script with SVG
-    const checkSvg = () => {
-      if (settled || !renderDiv) return false;
-      const svg = renderDiv.querySelector('svg');
-      if (svg) {
-        convertSvgToPng(svg as SVGSVGElement);
-        return true;
+    waitForTikzSvg(renderDiv, TIKZ_DOM_TIMEOUT_MS).then((svg) => {
+      if (cancelled) return;
+      if (!svg) {
+        setIsRendering(false);
+        setRenderError(true);
+        onImageReadyRef.current?.(null);
+        return;
       }
-      return false;
-    };
 
-    if (!checkSvg()) {
-      observer = new MutationObserver(() => { checkSvg(); });
-      observer.observe(renderDiv, { childList: true, subtree: true });
-    }
+      const svgClone = svg.cloneNode(true) as SVGElement;
+      if (!svgClone.getAttribute('xmlns')) svgClone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+      const svgData = new XMLSerializer().serializeToString(svgClone);
+      const svgBlob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
+      const url = URL.createObjectURL(svgBlob);
+
+      const img = new Image();
+      img.onload = () => {
+        if (cancelled) { URL.revokeObjectURL(url); return; }
+        const scale = 2;
+        const w = img.width * scale;
+        const h = img.height * scale;
+        const { canvas, ctx } = getReusableCanvas(w, h);
+        ctx.fillStyle = 'white';
+        ctx.fillRect(0, 0, w, h);
+        ctx.drawImage(img, 0, 0, w, h);
+        URL.revokeObjectURL(url);
+        const dataUrl = canvas.toDataURL('image/png');
+        setPngDataUrl(dataUrl);
+        setIsRendering(false);
+        onImageReadyRef.current?.(dataUrl);
+      };
+      img.onerror = () => {
+        URL.revokeObjectURL(url);
+        if (!cancelled) { setIsRendering(false); onImageReadyRef.current?.(null); }
+      };
+      img.src = url;
+    });
 
     return () => {
-      settled = true;
-      if (observer) observer.disconnect();
-      if (timer) clearTimeout(timer);
-      if (renderDiv?.parentNode) document.body.removeChild(renderDiv);
+      cancelled = true;
+      if (renderDiv.parentNode) document.body.removeChild(renderDiv);
     };
-  }, [code, onImageReady]);
+  }, [code]);
 
   return (
-    <div ref={containerRef} className="flex justify-center bg-white rounded-lg overflow-hidden min-h-[200px]">
+    <div className="flex justify-center bg-white rounded-lg overflow-hidden min-h-[200px]">
       {isRendering ? (
         <div className="flex items-center justify-center w-full h-48 text-[#00186E]/40">
           <Loader2 className="w-6 h-6 animate-spin mr-2 text-[#FFAD1D]" />

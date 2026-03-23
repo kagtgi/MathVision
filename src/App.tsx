@@ -9,7 +9,7 @@ import rehypeKatex from 'rehype-katex';
 import { motion } from 'framer-motion';
 import PdfToDocxConverter from './PdfToDocxConverter';
 import { generateTikzMultiAgent, extractTikzCode } from './utils/tikzMultiAgent';
-import { waitForTikzSvg, getReusableCanvas } from './utils/latexToImage';
+import { waitForTikzSvg, getReusableCanvas, preprocessTikzForTikzJax } from './utils/latexToImage';
 import { GEMINI_MODEL, LATEX_MATH_RULES, ANTI_HALLUCINATION, OUTPUT_FORMAT_RULES } from './utils/sharedPrompts';
 
 type AppMode = 'image-to-latex' | 'pdf-to-docx';
@@ -768,7 +768,7 @@ function TikzRendererWithRef({ code, onImageReady }: { code: string, onImageRead
 
     const script = document.createElement('script');
     script.type = 'text/tikz';
-    script.textContent = code;
+    script.textContent = preprocessTikzForTikzJax(code);
     renderDiv.appendChild(script);
 
     waitForTikzSvg(renderDiv, TIKZ_DOM_TIMEOUT_MS).then((svg) => {

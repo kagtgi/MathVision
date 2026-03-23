@@ -8,7 +8,7 @@ import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import { motion } from 'framer-motion';
 import PdfToDocxConverter from './PdfToDocxConverter';
-import { generateTikzMultiAgent } from './utils/tikzMultiAgent';
+import { generateTikzMultiAgent, extractTikzCode } from './utils/tikzMultiAgent';
 import { GEMINI_MODEL, LATEX_MATH_RULES, ANTI_HALLUCINATION, OUTPUT_FORMAT_RULES } from './utils/sharedPrompts';
 
 type AppMode = 'image-to-latex' | 'pdf-to-docx';
@@ -191,7 +191,10 @@ export default function App() {
       const hasTikz = output.includes('\\begin{tikzpicture}');
       if (hasTikz) {
         setProcessingStatus('Enhancing TikZ with multi-agent pipeline...');
-        setProcessingLog((prev) => [...prev, 'Geometric figure detected — running multi-agent TikZ pipeline for higher accuracy...']);
+        setProcessingLog((prev) => [...prev, 'Geometric figure detected — running Draft B + Verify pipeline...']);
+
+        // Extract the initial TikZ as Draft A — avoids regenerating it from scratch
+        const initialDraftA = extractTikzCode(output);
 
         try {
           const tikzResult = await generateTikzMultiAgent(
@@ -202,6 +205,7 @@ export default function App() {
               setProcessingStatus(detail);
               setProcessingLog((prev) => [...prev, detail]);
             },
+            initialDraftA,
           );
 
           if (tikzResult.log.length > 0) {
@@ -740,96 +744,98 @@ function CodeBlock({ language, code }: { language: string, code: string }) {
   );
 }
 
-const TIKZ_IFRAME_TIMEOUT_MS = 30000; // Max 30s for TikZ rendering in iframe
+const TIKZ_DOM_TIMEOUT_MS = 15_000; // 15s — TikZJax already loaded on main page, no re-download
 
 function TikzRendererWithRef({ code, onImageReady }: { code: string, onImageReady?: (dataUrl: string | null) => void }) {
   const [pngDataUrl, setPngDataUrl] = useState<string | null>(null);
   const [isRendering, setIsRendering] = useState(true);
   const [renderError, setRenderError] = useState(false);
-  const iframeRef = useRef<HTMLIFrameElement>(null);
-  const idRef = useRef(Math.random().toString(36).slice(2));
+  const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     let settled = false;
+    let observer: MutationObserver | null = null;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let renderDiv: HTMLDivElement | null = null;
 
-    // Timeout guard: if TikZJax never renders, fail gracefully
-    const timeoutId = setTimeout(() => {
-      if (!settled) {
-        settled = true;
-        setIsRendering(false);
-        setRenderError(true);
-        onImageReady?.(null);
-      }
-    }, TIKZ_IFRAME_TIMEOUT_MS);
-
-    const handler = (e: MessageEvent) => {
-      if (e.data?.tikzId !== idRef.current) return;
+    const finish = (dataUrl: string | null, isTimeout = false) => {
       if (settled) return;
       settled = true;
-      clearTimeout(timeoutId);
-
-      const iframe = iframeRef.current;
-      if (!iframe) { setIsRendering(false); onImageReady?.(null); return; }
-
-      // Use rAF instead of fixed delay for faster rendering
-      requestAnimationFrame(() => {
-        const svgEl = iframe.contentDocument?.querySelector('svg');
-        if (!svgEl) { setIsRendering(false); onImageReady?.(null); return; }
-
-        const svgClone = svgEl.cloneNode(true) as SVGElement;
-        if (!svgClone.getAttribute('xmlns')) svgClone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
-        const svgData = new XMLSerializer().serializeToString(svgClone);
-        const svgBlob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
-        const url = URL.createObjectURL(svgBlob);
-
-        const img = new Image();
-        img.onload = () => {
-          const scale = 2;
-          const canvas = document.createElement('canvas');
-          canvas.width = img.width * scale;
-          canvas.height = img.height * scale;
-          const ctx = canvas.getContext('2d')!;
-          ctx.fillStyle = 'white';
-          ctx.fillRect(0, 0, canvas.width, canvas.height);
-          ctx.scale(scale, scale);
-          ctx.drawImage(img, 0, 0);
-          URL.revokeObjectURL(url);
-          const dataUrl = canvas.toDataURL('image/png');
-          setPngDataUrl(dataUrl);
-          setIsRendering(false);
-          onImageReady?.(dataUrl);
-        };
-        img.onerror = () => { URL.revokeObjectURL(url); setIsRendering(false); onImageReady?.(null); };
-        img.src = url;
-      });
+      if (observer) observer.disconnect();
+      if (timer) clearTimeout(timer);
+      setPngDataUrl(dataUrl);
+      setIsRendering(false);
+      if (isTimeout && !dataUrl) setRenderError(true);
+      onImageReady?.(dataUrl);
     };
-    window.addEventListener('message', handler);
+
+    const convertSvgToPng = (svgEl: SVGSVGElement) => {
+      const svgClone = svgEl.cloneNode(true) as SVGElement;
+      if (!svgClone.getAttribute('xmlns')) svgClone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+      const svgData = new XMLSerializer().serializeToString(svgClone);
+      const svgBlob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
+      const url = URL.createObjectURL(svgBlob);
+
+      const img = new Image();
+      img.onload = () => {
+        const scale = 2;
+        const canvas = document.createElement('canvas');
+        canvas.width = img.width * scale;
+        canvas.height = img.height * scale;
+        const ctx = canvas.getContext('2d')!;
+        ctx.fillStyle = 'white';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.scale(scale, scale);
+        ctx.drawImage(img, 0, 0);
+        URL.revokeObjectURL(url);
+        finish(canvas.toDataURL('image/png'));
+      };
+      img.onerror = () => { URL.revokeObjectURL(url); finish(null); };
+      img.src = url;
+    };
+
+    // Render in main DOM — reuses the already-loaded TikZJax (no iframe re-download)
+    renderDiv = document.createElement('div');
+    renderDiv.style.position = 'absolute';
+    renderDiv.style.left = '-9999px';
+    renderDiv.style.top = '-9999px';
+    renderDiv.style.visibility = 'hidden';
+    document.body.appendChild(renderDiv);
+
+    const script = document.createElement('script');
+    script.type = 'text/tikz';
+    script.textContent = code;
+    renderDiv.appendChild(script);
+
+    // Timeout guard
+    timer = setTimeout(() => finish(null, true), TIKZ_DOM_TIMEOUT_MS);
+
+    // Watch for TikZJax to replace script with SVG
+    const checkSvg = () => {
+      if (settled || !renderDiv) return false;
+      const svg = renderDiv.querySelector('svg');
+      if (svg) {
+        convertSvgToPng(svg as SVGSVGElement);
+        return true;
+      }
+      return false;
+    };
+
+    if (!checkSvg()) {
+      observer = new MutationObserver(() => { checkSvg(); });
+      observer.observe(renderDiv, { childList: true, subtree: true });
+    }
+
     return () => {
-      window.removeEventListener('message', handler);
-      clearTimeout(timeoutId);
+      settled = true;
+      if (observer) observer.disconnect();
+      if (timer) clearTimeout(timer);
+      if (renderDiv?.parentNode) document.body.removeChild(renderDiv);
     };
-  }, [onImageReady]);
-
-  const tikzId = idRef.current;
-  const escapedCode = code.replace(/<\/script/gi, '<\\/script');
-  const srcDoc = `<!DOCTYPE html><html><head>
-<link rel="stylesheet" type="text/css" href="https://tikzjax.com/v1/fonts.css">
-<script src="https://tikzjax.com/v1/tikzjax.js"><\/script>
-<style>html,body{margin:0;padding:16px;background:white;display:flex;justify-content:center;align-items:start;overflow:hidden;}</style>
-</head><body>
-<script type="text/tikz">${escapedCode}<\/script>
-<script>new MutationObserver(function(m,o){if(document.querySelector('svg')){o.disconnect();requestAnimationFrame(function(){window.parent.postMessage({tikzId:'${tikzId}',height:document.documentElement.scrollHeight},'*')})}}).observe(document.body,{childList:true,subtree:true});<\/script>
-</body></html>`;
+  }, [code, onImageReady]);
 
   return (
-    <div className="flex justify-center bg-white rounded-lg overflow-hidden min-h-[200px]">
-      {/* Hidden iframe for tikzjax rendering */}
-      <iframe
-        ref={iframeRef}
-        srcDoc={srcDoc}
-        style={{ display: 'none' }}
-        title="TikZ Renderer"
-      />
+    <div ref={containerRef} className="flex justify-center bg-white rounded-lg overflow-hidden min-h-[200px]">
       {isRendering ? (
         <div className="flex items-center justify-center w-full h-48 text-[#00186E]/40">
           <Loader2 className="w-6 h-6 animate-spin mr-2 text-[#FFAD1D]" />

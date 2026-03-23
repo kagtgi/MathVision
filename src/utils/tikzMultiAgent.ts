@@ -1,15 +1,14 @@
 /**
- * Multi-Agent TikZ Generation Pipeline
+ * Multi-Agent TikZ Generation Pipeline — Optimized
  *
- * Optimized 2-phase architecture:
- *   1. Describe + Draft  — natural-language inventory + 2 parallel TikZ drafts
- *                          Draft A gets the description in-context (single round-trip)
- *                          Draft B runs in parallel with a fresh eye on the image
- *   2. Verify + Fix      — compare both drafts against the image, merge the best
- *                          parts, fix errors, output final compilable code
+ * 2-phase, 2-round-trip architecture:
+ *   Phase 1 (parallel):  Initial classify+extract (Draft A) runs alongside
+ *                         an independent Draft B — both see the original image.
+ *   Phase 2 (sequential): Verifier compares both drafts, merges the best parts,
+ *                          fixes errors, outputs final compilable code.
  *
- * All agents use gemini-pro-latest. Every agent sees the original image
- * so nothing is lost in translation.
+ * When Draft A is provided by the caller (from the initial classify call),
+ * only Draft B + Verify are needed — saving one full API round-trip.
  */
 
 import { GoogleGenAI } from '@google/genai';
@@ -17,7 +16,7 @@ import { GoogleGenAI } from '@google/genai';
 // ─── Constants ───────────────────────────────────────────────────────────────
 
 const MODEL = 'gemini-pro-latest';
-const AGENT_TIMEOUT_MS = 180_000; // 3 minutes
+const AGENT_TIMEOUT_MS = 120_000; // 2 minutes (reduced from 3 — Gemini Pro rarely needs >90s)
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -34,63 +33,6 @@ export interface TikzProgressCallback {
 }
 
 // ─── Prompts ─────────────────────────────────────────────────────────────────
-
-const DESCRIBE_AND_DRAFT_PROMPT = `You are a TikZ expert. Perform BOTH tasks below in a single response.
-
-TASK 1 — DESCRIBE: List every visible geometric element in the image. Be precise and exhaustive.
-
-Use this format:
-1. POINTS: Every labeled point with approximate relative position (e.g. "A is at the bottom-left vertex").
-2. SEGMENTS/LINES: Each segment/ray/line with endpoints, style (solid/dashed/dotted/thick), arrowheads, tick marks.
-3. ANGLES: Each marked angle with 3 defining points (vertex in middle), right-angle squares, arcs, labels/values.
-4. CIRCLES/ARCS: Center, radius info, style.
-5. AXES/GRIDS: Coordinate axes, tick marks, labels, range.
-6. CURVES: Function graphs or freehand curves with shape and labels.
-7. SHADING/FILL: Any filled or hatched regions.
-8. TEXT: Labels or annotations not associated with points.
-9. PROPORTIONS: Overall aspect ratio, relative point positions.
-
-TASK 2 — GENERATE TikZ: Write COMPLETE, COMPILABLE TikZ code reproducing the figure.
-
-Follow this structure exactly:
-% Required: \\usepackage{tikz}
-% \\usetikzlibrary{angles, quotes, calc, arrows.meta, decorations.markings}
-
-\\begin{tikzpicture}[scale=1]
-  % --- Coordinates ---
-  \\coordinate (A) at (x, y);
-  % --- Draw segments/shapes ---
-  \\draw[thick] (A) -- (B) -- (C) -- cycle;
-  % --- Angle marks ---
-  \\pic[draw, angle radius=8pt] {angle = C--B--A};
-  % --- Right angle marks ---
-  \\pic[draw] {right angle = A--H--B};
-  % --- Equal-length tick marks ---
-  \\draw[decoration={markings, mark=at position 0.5 with {\\draw (0,-2pt) -- (0,2pt);}}, postaction={decorate}] (A) -- (B);
-  % --- Point labels ---
-  \\fill (A) circle (1.5pt); \\node[below left] at (A) {$A$};
-\\end{tikzpicture}
-
-TikZ RULES:
-1. Define \\coordinate for EVERY named point BEFORE using it.
-2. Use \\fill (X) circle (1.5pt) and \\node for every labeled point.
-3. All math labels inside $...$: {$A$}, {$60^\\circ$}.
-4. [thick] for main edges, [dashed] for construction lines.
-5. angles library for angle arcs. right angle for 90° marks.
-6. decorations.markings for equal-segment tick marks.
-7. Coordinates in [0,6]×[0,6]. Match proportions from description.
-8. Only declare tikzlibraries you actually use.
-9. Must compile with pdflatex + tikz. No undefined macros.
-10. Include EVERY element from the description. Skip NOTHING.
-11. Do NOT add elements not in the image.
-
-Your response MUST have exactly this format:
-
-DESCRIPTION:
-(your numbered inventory from Task 1)
-
-TIKZ_CODE:
-(your complete TikZ code from Task 2)`;
 
 const DRAFT_B_PROMPT = `You are a TikZ expert. Look at this image of a geometric figure carefully.
 
@@ -122,17 +64,15 @@ Output ONLY the TikZ code. No explanation, no markdown fences.`;
 
 const VERIFY_FIX_PROMPT = `You are a TikZ quality verifier. You receive:
 1. The original image of a geometric figure
-2. A description of what the figure contains
-3. Two candidate TikZ code drafts
+2. Two candidate TikZ code drafts
 
 PART 1 — VERIFY (step by step):
-a) List every element from the description.
-b) For each element, check: present and correct in Draft A? In Draft B?
-c) Check each draft for compilation errors:
+a) Compare each draft against the original image element by element.
+b) Check each draft for compilation errors:
    - Any \\coordinate used before being defined?
    - Any undefined macros or missing libraries?
    - Syntax errors (unmatched braces, missing semicolons)?
-d) Compare proportions: which draft better matches the image layout?
+c) Compare proportions: which draft better matches the image layout?
 
 PART 2 — OUTPUT:
 Produce the FINAL TikZ code. You may:
@@ -155,10 +95,10 @@ FINAL_CODE:
 
 Rules:
 - FINAL_CODE must be complete and compile with pdflatex.
-- Every element from the description must be present.
+- Every element visible in the image must be present.
 - Do not add elements not in the image.
 - Do not hallucinate labels, points, or decorations not in the image.
-- If both drafts miss an element from the description, add it.
+- If both drafts miss a visible element, add it.
 - If both drafts include something NOT in the image, remove it.`;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -170,7 +110,7 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
   return Promise.race([promise, timeout]);
 }
 
-function extractTikzCode(text: string): string {
+export function extractTikzCode(text: string): string {
   // From FINAL_CODE: or TIKZ_CODE: marker
   const markerMatch = text.match(/(?:FINAL_CODE|TIKZ_CODE):\s*\n([\s\S]*)/);
   if (markerMatch) {
@@ -195,15 +135,6 @@ function extractTikzCode(text: string): string {
   return text.trim();
 }
 
-function extractDescription(text: string): string {
-  const match = text.match(/DESCRIPTION:\s*\n([\s\S]*?)(?=\nTIKZ_CODE:)/);
-  if (match) return match[1].trim();
-  // Fallback: everything before tikzpicture
-  const beforeCode = text.match(/([\s\S]*?)(?=% Required|\\begin\{tikzpicture\})/);
-  if (beforeCode && beforeCode[1].trim().length > 20) return beforeCode[1].trim();
-  return '';
-}
-
 function extractReasoning(text: string): string {
   const match = text.match(/REASONING:\s*\n([\s\S]*?)(?=\nFINAL_CODE:)/);
   if (match) return match[1].trim();
@@ -226,89 +157,109 @@ function callModel(
 
 // ─── Pipeline ────────────────────────────────────────────────────────────────
 
+/**
+ * Optimized pipeline: accepts an existing Draft A (from the initial classify call)
+ * so only Draft B + Verify need to run — 2 API calls instead of 3.
+ *
+ * If draftA is not provided, falls back to generating both drafts (3 calls total).
+ */
 export async function generateTikzMultiAgent(
   apiKey: string,
   imageBase64: string,
   mimeType: string,
   onProgress?: TikzProgressCallback,
+  draftA?: string,
 ): Promise<TikzGenerationResult> {
   const ai = new GoogleGenAI({ apiKey });
   const img = { inlineData: { data: imageBase64, mimeType } };
   const log: string[] = [];
-
-  // ── Phase 1: Describe+DraftA and DraftB in parallel (2 API calls instead of 3) ──
-
-  onProgress?.('describe', 'Analyzing figure + generating two TikZ drafts in parallel...');
-  log.push('Step 1: Running description+draft A and independent draft B in parallel...');
-
-  // Call A: Describe + Generate in one round-trip (saves ~3-5s)
-  const callA = withTimeout(
-    callModel(ai, [{ text: DESCRIBE_AND_DRAFT_PROMPT }, img], 0.15),
-    AGENT_TIMEOUT_MS,
-    'Describer+DraftA',
-  );
-
-  // Call B: Independent draft with fresh eye (runs in parallel)
-  const callB = withTimeout(
-    callModel(ai, [{ text: DRAFT_B_PROMPT }, img], 0.4),
-    AGENT_TIMEOUT_MS,
-    'DraftB',
-  );
-
-  const [respA, respB] = await Promise.allSettled([callA, callB]);
-
-  // Extract description from Call A
-  let description = '';
   const candidates: string[] = [];
 
-  if (respA.status === 'fulfilled') {
-    const textA = respA.value.text || '';
-    description = extractDescription(textA);
-    const codeA = extractTikzCode(textA);
-    if (codeA.includes('\\begin{tikzpicture}')) {
-      candidates.push(codeA);
-    }
-  } else {
-    console.warn('Describer+DraftA failed:', respA.reason);
-    log.push(`Draft A failed: ${respA.reason?.message || 'unknown error'}`);
-  }
+  // ── Phase 1: Get Draft B (+ Draft A if not provided) ──────────────────────
 
-  if (respB.status === 'fulfilled') {
-    const codeB = extractTikzCode(respB.value.text || '');
-    if (codeB.includes('\\begin{tikzpicture}')) {
-      candidates.push(codeB);
+  if (draftA && draftA.includes('\\begin{tikzpicture}')) {
+    // Draft A already available from the initial classify call — skip redundant generation
+    candidates.push(draftA);
+    log.push('Using initial TikZ output as Draft A (saved one API call).');
+
+    onProgress?.('describe', 'Generating independent Draft B for comparison...');
+    log.push('Step 1: Generating independent Draft B...');
+
+    try {
+      const respB = await withTimeout(
+        callModel(ai, [{ text: DRAFT_B_PROMPT }, img], 0.4),
+        AGENT_TIMEOUT_MS,
+        'DraftB',
+      );
+      const codeB = extractTikzCode(respB.text || '');
+      if (codeB.includes('\\begin{tikzpicture}')) {
+        candidates.push(codeB);
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'unknown error';
+      console.warn('DraftB failed:', msg);
+      log.push(`Draft B failed: ${msg}`);
     }
   } else {
-    console.warn('DraftB failed:', respB.reason);
-    log.push(`Draft B failed: ${respB.reason?.message || 'unknown error'}`);
+    // No Draft A provided — fire both in parallel (3 API calls total)
+    onProgress?.('describe', 'Generating two TikZ drafts in parallel...');
+    log.push('Step 1: Running two independent drafts in parallel...');
+
+    const callA = withTimeout(
+      callModel(ai, [{ text: DRAFT_B_PROMPT }, img], 0.15),
+      AGENT_TIMEOUT_MS,
+      'DraftA',
+    );
+    const callB = withTimeout(
+      callModel(ai, [{ text: DRAFT_B_PROMPT }, img], 0.4),
+      AGENT_TIMEOUT_MS,
+      'DraftB',
+    );
+
+    const [respA, respB] = await Promise.allSettled([callA, callB]);
+
+    if (respA.status === 'fulfilled') {
+      const codeA = extractTikzCode(respA.value.text || '');
+      if (codeA.includes('\\begin{tikzpicture}')) candidates.push(codeA);
+    } else {
+      log.push(`Draft A failed: ${respA.reason?.message || 'unknown error'}`);
+    }
+
+    if (respB.status === 'fulfilled') {
+      const codeB = extractTikzCode(respB.value.text || '');
+      if (codeB.includes('\\begin{tikzpicture}')) candidates.push(codeB);
+    } else {
+      log.push(`Draft B failed: ${respB.reason?.message || 'unknown error'}`);
+    }
   }
 
   if (candidates.length === 0) {
-    throw new Error('Both TikZ generators failed. Please try again.');
+    throw new Error('TikZ generation failed. Please try again.');
   }
 
   log.push(`Got ${candidates.length} valid draft${candidates.length > 1 ? 's' : ''}.`);
 
-  // If no description was extracted, note it
-  if (!description) {
-    log.push('Description extraction failed; verifier will work from image only.');
-  }
-
-  // If only one candidate, duplicate for verifier
-  if (candidates.length === 1) {
-    candidates.push(candidates[0]);
-  }
-
   // ── Phase 2: Verify + Fix ─────────────────────────────────────────────────
 
-  onProgress?.('verify', 'Verifying drafts against image — checking every element...');
+  // If only one candidate, skip verify and return it directly — saves another round-trip
+  if (candidates.length === 1) {
+    log.push('Only one draft available — returning it directly (skipping verify).');
+    onProgress?.('complete', 'TikZ generation complete.');
+    return {
+      tikzCode: candidates[0],
+      description: '',
+      candidates,
+      reasoning: 'Single draft — no verification needed.',
+      log,
+    };
+  }
+
+  onProgress?.('verify', 'Verifying drafts against image — picking best result...');
   log.push('Step 2: Verifying both drafts against the image...');
 
   const draftText = candidates
     .map((code, i) => `=== DRAFT ${String.fromCharCode(65 + i)} ===\n${code}`)
     .join('\n\n');
-
-  const descSection = description ? `DESCRIPTION:\n${description}\n\n` : '';
 
   const verifyResponse = await withTimeout(
     callModel(
@@ -316,9 +267,7 @@ export async function generateTikzMultiAgent(
       [
         { text: VERIFY_FIX_PROMPT },
         img,
-        {
-          text: `${descSection}${draftText}\n\nVerify and produce the final code.`,
-        },
+        { text: `${draftText}\n\nVerify and produce the final code.` },
       ],
       0.1,
     ),
@@ -346,7 +295,7 @@ export async function generateTikzMultiAgent(
     log.push('Verifier did not produce valid code. Using best draft directly.');
     return {
       tikzCode: candidates[0],
-      description,
+      description: '',
       candidates,
       reasoning: reasoning || 'Verification produced no code; using draft A.',
       log,
@@ -358,7 +307,7 @@ export async function generateTikzMultiAgent(
 
   return {
     tikzCode: finalCode,
-    description,
+    description: '',
     candidates,
     reasoning,
     log,

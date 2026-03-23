@@ -81,13 +81,13 @@ CRITICAL — accuracy rules you MUST follow:
 `;
 
 // ─── TikZJax compatibility rules ─────────────────────────────────────────────
-// TikZJax (browser-based renderer) does NOT support PGF math functions.
-// Using them causes a silent hang until the 30-second timeout.
+// TikZJax (browser-based renderer) does NOT support PGF math functions or
+// xcolor's `!` color-mixing syntax.  Both cause a silent hang until timeout.
 
 export const TIKZJAX_COMPAT_RULES = `
 CRITICAL — TikZJax compatibility (MUST follow):
 The TikZ code will be rendered in a BROWSER using TikZJax, which does NOT support
-PGF math functions. Using them causes the renderer to hang silently.
+PGF math functions or xcolor color mixing. Using them causes the renderer to hang silently.
 
 FORBIDDEN in coordinate values or expressions:
   sqrt(), sin(), cos(), tan(), abs(), pow(), mod(), ln(), exp(),
@@ -106,6 +106,15 @@ INSTEAD — pre-compute all values to plain decimal numbers:
 ALSO FORBIDDEN — calc library expressions with math functions:
   ✗ BAD:  \\coordinate (M) at ($(A)!{sqrt(2)/2}!(B)$);
   ✓ GOOD: \\coordinate (M) at ($(A)!0.70711!(B)$);
+
+ALSO FORBIDDEN — xcolor color mixing with ! syntax:
+  ✗ BAD:  \\fill[teal!80!black] ...
+  ✓ GOOD: \\fill[teal] ...
+  ✓ GOOD: \\definecolor{myteal}{RGB}{0,102,102} then \\fill[myteal] ...
+
+Use only plain named colors (red, blue, green, cyan, magenta, yellow, black,
+white, gray, darkgray, lightgray, brown, lime, olive, orange, pink, purple,
+teal, violet) or \\definecolor with explicit RGB values.
 
 Every coordinate value must be a plain number (integer or decimal). No braces
 around expressions, no function calls, no PGF math operators.

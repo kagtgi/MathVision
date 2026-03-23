@@ -15,8 +15,47 @@ const KATEX_CSS_URL = 'https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.
 // TikZJax doesn't support PGF math functions (sqrt, sin, cos, etc.) in
 // coordinate expressions.  We evaluate {…} blocks that contain these functions
 // into plain numbers so the browser renderer won't hang.
+//
+// TikZJax also can't handle xcolor's `!` color-mixing syntax (e.g.
+// teal!80!black) — it causes a silent hang identical to the PGF-math case.
+// We resolve mixed colors to \definecolor commands with plain RGB values.
 
 const DEG = Math.PI / 180;
+
+// ─── xcolor mixing preprocessing ─────────────────────────────────────────────
+
+const XCOLOR_BASE: Record<string, [number, number, number]> = {
+  red: [255, 0, 0], green: [0, 128, 0], blue: [0, 0, 255],
+  cyan: [0, 255, 255], magenta: [255, 0, 255], yellow: [255, 255, 0],
+  black: [0, 0, 0], white: [255, 255, 255],
+  darkgray: [64, 64, 64], gray: [128, 128, 128], lightgray: [191, 191, 191],
+  brown: [128, 0, 0], lime: [191, 255, 0], olive: [128, 128, 0],
+  orange: [255, 128, 0], pink: [255, 191, 203], purple: [128, 0, 128],
+  teal: [0, 128, 128], violet: [128, 0, 255],
+};
+
+/** Resolve an xcolor mixing expression (e.g. "teal!80!black") to RGB. */
+function resolveXcolorMix(expr: string): [number, number, number] | null {
+  const parts = expr.split('!');
+  if (parts.length < 3) return null; // Need at least color!pct!color
+  const base = XCOLOR_BASE[parts[0]];
+  if (!base) return null;
+
+  let rgb: [number, number, number] = [base[0], base[1], base[2]];
+  for (let i = 1; i < parts.length; i += 2) {
+    const pct = parseInt(parts[i], 10);
+    if (isNaN(pct) || pct < 0 || pct > 100) return null;
+    const other = (i + 1 < parts.length) ? XCOLOR_BASE[parts[i + 1]] : XCOLOR_BASE.white;
+    if (!other) return null;
+    const t = pct / 100;
+    rgb = [
+      Math.round(rgb[0] * t + other[0] * (1 - t)),
+      Math.round(rgb[1] * t + other[1] * (1 - t)),
+      Math.round(rgb[2] * t + other[2] * (1 - t)),
+    ];
+  }
+  return rgb;
+}
 
 /** Minimal math evaluator for PGF-style expressions. */
 function evalPgfExpr(expr: string): number | null {
@@ -80,17 +119,36 @@ function evalPgfExpr(expr: string): number | null {
 
 /**
  * Preprocess TikZ code for TikZJax compatibility.
- * Evaluates PGF math expressions inside {…} (e.g. {sqrt(3)}) to plain numbers.
+ * 1. Evaluates PGF math expressions inside {…} (e.g. {sqrt(3)}) to plain numbers.
+ * 2. Resolves xcolor `!` mixing syntax (e.g. teal!80!black) to \definecolor + plain name.
  */
 export function preprocessTikzForTikzJax(code: string): string {
-  // Match {expr} where expr contains a known PGF math function
-  return code.replace(/\{([^{}]*(?:sqrt|sin|cos|tan|abs|ln|exp|floor|ceil|round|min|max|pow|mod|pi)[^{}]*)\}/g, (_match, inner: string) => {
+  // 1. Evaluate PGF math expressions
+  let result = code.replace(/\{([^{}]*(?:sqrt|sin|cos|tan|abs|ln|exp|floor|ceil|round|min|max|pow|mod|pi)[^{}]*)\}/g, (_match, inner: string) => {
     const val = evalPgfExpr(inner);
     if (val === null) return _match; // couldn't evaluate — leave unchanged
     // Round to 5 decimal places to keep code readable
     const rounded = Math.round(val * 100000) / 100000;
     return String(rounded);
   });
+
+  // 2. Resolve xcolor mixing expressions (e.g. teal!80!black → definecolor + name)
+  const colorDefs = new Map<string, string>();
+  result = result.replace(/\b([a-zA-Z]+(?:![0-9]+![a-zA-Z]+)+)\b/g, (match) => {
+    const rgb = resolveXcolorMix(match);
+    if (!rgb) return match;
+    const name = `mclr${rgb[0]}x${rgb[1]}x${rgb[2]}`;
+    colorDefs.set(name, `\\definecolor{${name}}{RGB}{${rgb[0]},${rgb[1]},${rgb[2]}}`);
+    return name;
+  });
+
+  if (colorDefs.size > 0) {
+    const defs = [...colorDefs.values()].join('\n');
+    // Insert \definecolor commands right after \begin{tikzpicture}[...]
+    result = result.replace(/(\\begin\{tikzpicture\}(?:\[[^\]]*\])?)/, `$1\n${defs}`);
+  }
+
+  return result;
 }
 
 // ─── Reusable canvas pool ─────────────────────────────────────────────────────
@@ -342,7 +400,8 @@ function isTikzJaxLoaded(): boolean {
 
 /**
  * Wait for an SVG element inside a container (created by TikZJax).
- * Uses MutationObserver for instant detection instead of rAF polling.
+ * Uses MutationObserver for instant detection with a polling fallback
+ * (every 500 ms) in case the observer misses DOM changes.
  * Fails fast if TikZJax is not loaded or if a TikZJax error is detected.
  */
 export function waitForTikzSvg(container: HTMLElement, timeoutMs: number): Promise<SVGSVGElement | null> {
@@ -365,10 +424,11 @@ export function waitForTikzSvg(container: HTMLElement, timeoutMs: number): Promi
       settled = true;
       observer.disconnect();
       clearTimeout(timer);
+      clearInterval(poll);
       resolve(svg);
     };
 
-    const observer = new MutationObserver(() => {
+    const check = () => {
       // Success: SVG rendered
       const svg = container.querySelector('svg');
       if (svg) { settle(svg); return; }
@@ -377,14 +437,20 @@ export function waitForTikzSvg(container: HTMLElement, timeoutMs: number): Promi
       // message or remove it without producing an SVG. If the script element
       // is gone and there's no SVG, compilation failed.
       const script = container.querySelector('script[type="text/tikz"]');
-      if (!script && !container.querySelector('svg')) {
+      if (!script) {
         console.warn('TikZJax removed script without producing SVG — compile error');
         settle(null);
       }
-    });
+    };
+
+    const observer = new MutationObserver(check);
 
     const timer = setTimeout(() => { settle(null); }, timeoutMs);
 
-    observer.observe(container, { childList: true, subtree: true });
+    // Polling fallback: check every 500ms in case MutationObserver misses events
+    // (e.g. TikZJax modifying attributes rather than child nodes)
+    const poll = setInterval(check, 500);
+
+    observer.observe(container, { childList: true, subtree: true, attributes: true });
   });
 }

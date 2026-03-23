@@ -15,7 +15,7 @@ const KATEX_CSS_URL = 'https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.
 
 let _reusableCanvas: HTMLCanvasElement | null = null;
 
-function getReusableCanvas(width: number, height: number): { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D } {
+export function getReusableCanvas(width: number, height: number): { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D } {
   if (!_reusableCanvas) {
     _reusableCanvas = document.createElement('canvas');
   }
@@ -246,7 +246,7 @@ export async function tikzToImage(
  * Wait for an SVG element inside a container (created by TikZJax).
  * Uses MutationObserver for instant detection instead of rAF polling.
  */
-function waitForTikzSvg(container: HTMLElement, timeoutMs: number): Promise<SVGSVGElement | null> {
+export function waitForTikzSvg(container: HTMLElement, timeoutMs: number): Promise<SVGSVGElement | null> {
   return new Promise((resolve) => {
     // Check immediately in case SVG is already present
     const existing = container.querySelector('svg');

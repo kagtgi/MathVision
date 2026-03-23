@@ -8,7 +8,8 @@ import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import { motion } from 'framer-motion';
 import PdfToDocxConverter from './PdfToDocxConverter';
-import { generateTikzMultiAgent } from './utils/tikzMultiAgent';
+import { generateTikzMultiAgent, extractTikzCode } from './utils/tikzMultiAgent';
+import { waitForTikzSvg, getReusableCanvas } from './utils/latexToImage';
 import { GEMINI_MODEL, LATEX_MATH_RULES, ANTI_HALLUCINATION, OUTPUT_FORMAT_RULES } from './utils/sharedPrompts';
 
 type AppMode = 'image-to-latex' | 'pdf-to-docx';
@@ -191,16 +192,22 @@ export default function App() {
       const hasTikz = output.includes('\\begin{tikzpicture}');
       if (hasTikz) {
         setProcessingStatus('Enhancing TikZ with multi-agent pipeline...');
-        setProcessingLog((prev) => [...prev, 'Geometric figure detected — running multi-agent TikZ pipeline for higher accuracy...']);
+        setProcessingLog((prev) => [...prev, 'Geometric figure detected — running Draft B + Verify pipeline...']);
+
+        // Extract the initial TikZ as Draft A — avoids regenerating it from scratch
+        const initialDraftA = extractTikzCode(output);
 
         try {
           const tikzResult = await generateTikzMultiAgent(
             apiKey,
             base64Data,
             mimeType || 'image/jpeg',
-            (_stage, detail) => {
-              setProcessingStatus(detail);
-              setProcessingLog((prev) => [...prev, detail]);
+            {
+              onProgress: (_stage, detail) => {
+                setProcessingStatus(detail);
+                setProcessingLog((prev) => [...prev, detail]);
+              },
+              draftA: initialDraftA,
             },
           );
 
@@ -740,96 +747,76 @@ function CodeBlock({ language, code }: { language: string, code: string }) {
   );
 }
 
-const TIKZ_IFRAME_TIMEOUT_MS = 30000; // Max 30s for TikZ rendering in iframe
+const TIKZ_DOM_TIMEOUT_MS = 15_000; // TikZJax already loaded on main page, no re-download
 
 function TikzRendererWithRef({ code, onImageReady }: { code: string, onImageReady?: (dataUrl: string | null) => void }) {
   const [pngDataUrl, setPngDataUrl] = useState<string | null>(null);
   const [isRendering, setIsRendering] = useState(true);
   const [renderError, setRenderError] = useState(false);
-  const iframeRef = useRef<HTMLIFrameElement>(null);
-  const idRef = useRef(Math.random().toString(36).slice(2));
+  const onImageReadyRef = useRef(onImageReady);
+  onImageReadyRef.current = onImageReady;
 
   useEffect(() => {
-    let settled = false;
+    let cancelled = false;
 
-    // Timeout guard: if TikZJax never renders, fail gracefully
-    const timeoutId = setTimeout(() => {
-      if (!settled) {
-        settled = true;
+    const renderDiv = document.createElement('div');
+    renderDiv.style.position = 'absolute';
+    renderDiv.style.left = '-9999px';
+    renderDiv.style.top = '-9999px';
+    renderDiv.style.visibility = 'hidden';
+    document.body.appendChild(renderDiv);
+
+    const script = document.createElement('script');
+    script.type = 'text/tikz';
+    script.textContent = code;
+    renderDiv.appendChild(script);
+
+    waitForTikzSvg(renderDiv, TIKZ_DOM_TIMEOUT_MS).then((svg) => {
+      if (cancelled) return;
+      if (!svg) {
         setIsRendering(false);
         setRenderError(true);
-        onImageReady?.(null);
+        onImageReadyRef.current?.(null);
+        return;
       }
-    }, TIKZ_IFRAME_TIMEOUT_MS);
 
-    const handler = (e: MessageEvent) => {
-      if (e.data?.tikzId !== idRef.current) return;
-      if (settled) return;
-      settled = true;
-      clearTimeout(timeoutId);
+      const svgClone = svg.cloneNode(true) as SVGElement;
+      if (!svgClone.getAttribute('xmlns')) svgClone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+      const svgData = new XMLSerializer().serializeToString(svgClone);
+      const svgBlob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
+      const url = URL.createObjectURL(svgBlob);
 
-      const iframe = iframeRef.current;
-      if (!iframe) { setIsRendering(false); onImageReady?.(null); return; }
+      const img = new Image();
+      img.onload = () => {
+        if (cancelled) { URL.revokeObjectURL(url); return; }
+        const scale = 2;
+        const w = img.width * scale;
+        const h = img.height * scale;
+        const { canvas, ctx } = getReusableCanvas(w, h);
+        ctx.fillStyle = 'white';
+        ctx.fillRect(0, 0, w, h);
+        ctx.drawImage(img, 0, 0, w, h);
+        URL.revokeObjectURL(url);
+        const dataUrl = canvas.toDataURL('image/png');
+        setPngDataUrl(dataUrl);
+        setIsRendering(false);
+        onImageReadyRef.current?.(dataUrl);
+      };
+      img.onerror = () => {
+        URL.revokeObjectURL(url);
+        if (!cancelled) { setIsRendering(false); onImageReadyRef.current?.(null); }
+      };
+      img.src = url;
+    });
 
-      // Use rAF instead of fixed delay for faster rendering
-      requestAnimationFrame(() => {
-        const svgEl = iframe.contentDocument?.querySelector('svg');
-        if (!svgEl) { setIsRendering(false); onImageReady?.(null); return; }
-
-        const svgClone = svgEl.cloneNode(true) as SVGElement;
-        if (!svgClone.getAttribute('xmlns')) svgClone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
-        const svgData = new XMLSerializer().serializeToString(svgClone);
-        const svgBlob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
-        const url = URL.createObjectURL(svgBlob);
-
-        const img = new Image();
-        img.onload = () => {
-          const scale = 2;
-          const canvas = document.createElement('canvas');
-          canvas.width = img.width * scale;
-          canvas.height = img.height * scale;
-          const ctx = canvas.getContext('2d')!;
-          ctx.fillStyle = 'white';
-          ctx.fillRect(0, 0, canvas.width, canvas.height);
-          ctx.scale(scale, scale);
-          ctx.drawImage(img, 0, 0);
-          URL.revokeObjectURL(url);
-          const dataUrl = canvas.toDataURL('image/png');
-          setPngDataUrl(dataUrl);
-          setIsRendering(false);
-          onImageReady?.(dataUrl);
-        };
-        img.onerror = () => { URL.revokeObjectURL(url); setIsRendering(false); onImageReady?.(null); };
-        img.src = url;
-      });
-    };
-    window.addEventListener('message', handler);
     return () => {
-      window.removeEventListener('message', handler);
-      clearTimeout(timeoutId);
+      cancelled = true;
+      if (renderDiv.parentNode) document.body.removeChild(renderDiv);
     };
-  }, [onImageReady]);
-
-  const tikzId = idRef.current;
-  const escapedCode = code.replace(/<\/script/gi, '<\\/script');
-  const srcDoc = `<!DOCTYPE html><html><head>
-<link rel="stylesheet" type="text/css" href="https://tikzjax.com/v1/fonts.css">
-<script src="https://tikzjax.com/v1/tikzjax.js"><\/script>
-<style>html,body{margin:0;padding:16px;background:white;display:flex;justify-content:center;align-items:start;overflow:hidden;}</style>
-</head><body>
-<script type="text/tikz">${escapedCode}<\/script>
-<script>new MutationObserver(function(m,o){if(document.querySelector('svg')){o.disconnect();requestAnimationFrame(function(){window.parent.postMessage({tikzId:'${tikzId}',height:document.documentElement.scrollHeight},'*')})}}).observe(document.body,{childList:true,subtree:true});<\/script>
-</body></html>`;
+  }, [code]);
 
   return (
     <div className="flex justify-center bg-white rounded-lg overflow-hidden min-h-[200px]">
-      {/* Hidden iframe for tikzjax rendering */}
-      <iframe
-        ref={iframeRef}
-        srcDoc={srcDoc}
-        style={{ display: 'none' }}
-        title="TikZ Renderer"
-      />
       {isRendering ? (
         <div className="flex items-center justify-center w-full h-48 text-[#00186E]/40">
           <Loader2 className="w-6 h-6 animate-spin mr-2 text-[#FFAD1D]" />

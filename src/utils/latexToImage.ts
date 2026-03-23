@@ -11,6 +11,78 @@ const MIN_TIKZ_DIMENSION = 100;
 
 const KATEX_CSS_URL = 'https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css';
 
+// ─── TikZ preprocessing for TikZJax compatibility ───────────────────────────
+// TikZJax doesn't support PGF math functions (sqrt, sin, cos, etc.) in
+// coordinate expressions.  We evaluate {…} blocks that contain these functions
+// into plain numbers so the browser renderer won't hang.
+
+const DEG = Math.PI / 180;
+
+/** Minimal math evaluator for PGF-style expressions. */
+function evalPgfExpr(expr: string): number | null {
+  // Normalise whitespace
+  let s = expr.trim();
+  if (s.length === 0) return null;
+
+  // Replace PGF math functions with JS equivalents (TikZ uses degrees)
+  s = s.replace(/\bsqrt\s*\(/g, 'Math.sqrt(');
+  s = s.replace(/\babs\s*\(/g, 'Math.abs(');
+  s = s.replace(/\bsin\s*\(/g, 'Math.sin(DEG*(');
+  s = s.replace(/\bcos\s*\(/g, 'Math.cos(DEG*(');
+  s = s.replace(/\btan\s*\(/g, 'Math.tan(DEG*(');
+
+  // Close extra parens introduced by trig wrappers:  sin(30) → Math.sin(DEG*(30))
+  // Count how many DEG*( we inserted vs how many closing parens exist
+  const trigCount = (s.match(/DEG\*\(/g) || []).length;
+  for (let i = 0; i < trigCount; i++) {
+    // Find the matching ')' for the original function call and double it
+    const idx = s.indexOf('DEG*(');
+    if (idx === -1) break;
+    let depth = 0;
+    for (let j = idx + 4; j < s.length; j++) {
+      if (s[j] === '(') depth++;
+      if (s[j] === ')') {
+        if (depth === 0) {
+          s = s.slice(0, j + 1) + ')' + s.slice(j + 1);
+          break;
+        }
+        depth--;
+      }
+    }
+  }
+
+  // Allow only safe characters: digits, operators, parens, dots, Math.*, DEG
+  const safe = s.replace(/Math\.\w+/g, '').replace(/DEG/g, '');
+  if (/[^0-9+\-*/().,%^ \t]/.test(safe)) return null;
+
+  // Replace ^ with ** for exponentiation
+  s = s.replace(/\^/g, '**');
+
+  try {
+    // eslint-disable-next-line no-new-func
+    const val = new Function('Math', 'DEG', `"use strict"; return (${s});`)(Math, DEG);
+    if (typeof val !== 'number' || !isFinite(val)) return null;
+    return val;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Preprocess TikZ code for TikZJax compatibility.
+ * Evaluates PGF math expressions inside {…} (e.g. {sqrt(3)}) to plain numbers.
+ */
+export function preprocessTikzForTikzJax(code: string): string {
+  // Match {expr} where expr contains a known math function
+  return code.replace(/\{([^{}]*(?:sqrt|sin|cos|tan|abs)[^{}]*)\}/g, (_match, inner: string) => {
+    const val = evalPgfExpr(inner);
+    if (val === null) return _match; // couldn't evaluate — leave unchanged
+    // Round to 5 decimal places to keep code readable
+    const rounded = Math.round(val * 100000) / 100000;
+    return String(rounded);
+  });
+}
+
 // ─── Reusable canvas pool ─────────────────────────────────────────────────────
 
 let _reusableCanvas: HTMLCanvasElement | null = null;
@@ -184,7 +256,7 @@ export async function tikzToImage(
 
     const script = document.createElement('script');
     script.type = 'text/tikz';
-    script.textContent = tikzCode;
+    script.textContent = preprocessTikzForTikzJax(tikzCode);
     container.appendChild(script);
 
     // Wait for TikZJax to render (it converts script elements to SVG)

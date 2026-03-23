@@ -10,7 +10,7 @@ import { motion } from 'framer-motion';
 import PdfToDocxConverter from './PdfToDocxConverter';
 import { generateTikzMultiAgent, extractTikzCode } from './utils/tikzMultiAgent';
 import { waitForTikzSvg, getReusableCanvas, preprocessTikzForTikzJax } from './utils/latexToImage';
-import { GEMINI_MODEL, LATEX_MATH_RULES, ANTI_HALLUCINATION, OUTPUT_FORMAT_RULES } from './utils/sharedPrompts';
+import { GEMINI_MODEL, LATEX_MATH_RULES, ANTI_HALLUCINATION, OUTPUT_FORMAT_RULES, TIKZJAX_COMPAT_RULES } from './utils/sharedPrompts';
 
 type AppMode = 'image-to-latex' | 'pdf-to-docx';
 
@@ -49,6 +49,7 @@ The multi-agent pipeline will refine it, but make a best effort:
 - Equal-segment ticks: decorations.markings
 - Fit in [0,6]×[0,6], scale=1 default
 - Do NOT add elements not visible in the image.
+${TIKZJAX_COMPAT_RULES}
 
 ## Step 2B — Formulas → LaTeX
 

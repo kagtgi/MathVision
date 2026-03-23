@@ -12,6 +12,7 @@
  */
 
 import { GoogleGenAI } from '@google/genai';
+import { TIKZJAX_COMPAT_RULES } from './sharedPrompts';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -58,8 +59,7 @@ RULES:
 5. Coordinates in [0,6]×[0,6]. Match the image proportions.
 6. Only libraries you use. Must compile with pdflatex.
 7. Include EVERY visible element. Do NOT add anything not in the image.
-8. Use NUMERICAL coordinate values only — do NOT use math functions like sqrt(), sin(), cos() inside coordinates. Pre-compute them (e.g. write 1.73205 instead of {sqrt(3)}).
-
+${TIKZJAX_COMPAT_RULES}
 Output ONLY the TikZ code. No explanation, no markdown fences.`;
 
 const VERIFY_FIX_PROMPT = `You are a TikZ quality verifier. You receive:
@@ -100,7 +100,7 @@ Rules:
 - Do not hallucinate labels, points, or decorations not in the image.
 - If both drafts miss a visible element, add it.
 - If both drafts include something NOT in the image, remove it.
-- Use NUMERICAL coordinate values — replace any sqrt(), sin(), cos() calls with pre-computed decimal numbers.`;
+${TIKZJAX_COMPAT_RULES}`;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 

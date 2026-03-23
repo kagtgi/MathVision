@@ -80,6 +80,37 @@ CRITICAL — accuracy rules you MUST follow:
 7. Do NOT "improve" or "correct" what appears to be a mistake in the original — reproduce it as-is.
 `;
 
+// ─── TikZJax compatibility rules ─────────────────────────────────────────────
+// TikZJax (browser-based renderer) does NOT support PGF math functions.
+// Using them causes a silent hang until the 30-second timeout.
+
+export const TIKZJAX_COMPAT_RULES = `
+CRITICAL — TikZJax compatibility (MUST follow):
+The TikZ code will be rendered in a BROWSER using TikZJax, which does NOT support
+PGF math functions. Using them causes the renderer to hang silently.
+
+FORBIDDEN in coordinate values or expressions:
+  sqrt(), sin(), cos(), tan(), abs(), pow(), mod(), ln(), exp(),
+  min(), max(), floor(), ceil(), round(), rnd(), pi, e
+
+INSTEAD — pre-compute all values to plain decimal numbers:
+  ✗ BAD:  \\coordinate (C) at (3, {sqrt(3)});
+  ✓ GOOD: \\coordinate (C) at (3, 1.73205);
+
+  ✗ BAD:  \\coordinate (P) at ({2*cos(60)}, {2*sin(60)});
+  ✓ GOOD: \\coordinate (P) at (1, 1.73205);
+
+  ✗ BAD:  \\draw (0,0) -- ({3*cos(30)},{3*sin(30)});
+  ✓ GOOD: \\draw (0,0) -- (2.59808, 1.5);
+
+ALSO FORBIDDEN — calc library expressions with math functions:
+  ✗ BAD:  \\coordinate (M) at ($(A)!{sqrt(2)/2}!(B)$);
+  ✓ GOOD: \\coordinate (M) at ($(A)!0.70711!(B)$);
+
+Every coordinate value must be a plain number (integer or decimal). No braces
+around expressions, no function calls, no PGF math operators.
+`;
+
 // ─── Output format guardrails ────────────────────────────────────────────────
 // Shared constraints to reduce LLM output variability
 

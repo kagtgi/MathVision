@@ -30,6 +30,16 @@ function evalPgfExpr(expr: string): number | null {
   s = s.replace(/\bsin\s*\(/g, 'Math.sin(DEG*(');
   s = s.replace(/\bcos\s*\(/g, 'Math.cos(DEG*(');
   s = s.replace(/\btan\s*\(/g, 'Math.tan(DEG*(');
+  s = s.replace(/\bln\s*\(/g, 'Math.log(');
+  s = s.replace(/\bexp\s*\(/g, 'Math.exp(');
+  s = s.replace(/\bfloor\s*\(/g, 'Math.floor(');
+  s = s.replace(/\bceil\s*\(/g, 'Math.ceil(');
+  s = s.replace(/\bround\s*\(/g, 'Math.round(');
+  s = s.replace(/\bmin\s*\(/g, 'Math.min(');
+  s = s.replace(/\bmax\s*\(/g, 'Math.max(');
+  s = s.replace(/\bpow\s*\(/g, 'Math.pow(');
+  s = s.replace(/\bmod\s*\(/g, '((a,b)=>a%b)(');  // PGF mod(a,b) → JS modulo
+  s = s.replace(/\bpi\b/g, 'Math.PI');
 
   // Close extra parens introduced by trig wrappers:  sin(30) → Math.sin(DEG*(30))
   // Count how many DEG*( we inserted vs how many closing parens exist
@@ -39,7 +49,7 @@ function evalPgfExpr(expr: string): number | null {
     const idx = s.indexOf('DEG*(');
     if (idx === -1) break;
     let depth = 0;
-    for (let j = idx + 4; j < s.length; j++) {
+    for (let j = idx + 5; j < s.length; j++) {
       if (s[j] === '(') depth++;
       if (s[j] === ')') {
         if (depth === 0) {
@@ -73,8 +83,8 @@ function evalPgfExpr(expr: string): number | null {
  * Evaluates PGF math expressions inside {…} (e.g. {sqrt(3)}) to plain numbers.
  */
 export function preprocessTikzForTikzJax(code: string): string {
-  // Match {expr} where expr contains a known math function
-  return code.replace(/\{([^{}]*(?:sqrt|sin|cos|tan|abs)[^{}]*)\}/g, (_match, inner: string) => {
+  // Match {expr} where expr contains a known PGF math function
+  return code.replace(/\{([^{}]*(?:sqrt|sin|cos|tan|abs|ln|exp|floor|ceil|round|min|max|pow|mod|pi)[^{}]*)\}/g, (_match, inner: string) => {
     const val = evalPgfExpr(inner);
     if (val === null) return _match; // couldn't evaluate — leave unchanged
     // Round to 5 decimal places to keep code readable

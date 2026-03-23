@@ -747,7 +747,7 @@ function CodeBlock({ language, code }: { language: string, code: string }) {
   );
 }
 
-const TIKZ_DOM_TIMEOUT_MS = 15_000; // TikZJax already loaded on main page, no re-download
+const TIKZ_DOM_TIMEOUT_MS = 30_000; // Match TIKZ_RENDER_TIMEOUT_MS; complex figures need full 30s
 
 function TikzRendererWithRef({ code, onImageReady }: { code: string, onImageReady?: (dataUrl: string | null) => void }) {
   const [pngDataUrl, setPngDataUrl] = useState<string | null>(null);
@@ -774,6 +774,9 @@ function TikzRendererWithRef({ code, onImageReady }: { code: string, onImageRead
     waitForTikzSvg(renderDiv, TIKZ_DOM_TIMEOUT_MS).then((svg) => {
       if (cancelled) return;
       if (!svg) {
+        // Clean up the off-screen div immediately on failure instead of
+        // waiting for component unmount, to avoid accumulating DOM nodes.
+        if (renderDiv.parentNode) document.body.removeChild(renderDiv);
         setIsRendering(false);
         setRenderError(true);
         onImageReadyRef.current?.(null);

@@ -243,33 +243,65 @@ export async function tikzToImage(
 }
 
 /**
+ * Check whether the TikZJax library has finished loading.
+ * TikZJax replaces <script type="text/tikz"> elements with SVGs once ready.
+ * If the global function/object isn't present, the CDN script likely failed.
+ */
+function isTikzJaxLoaded(): boolean {
+  // TikZJax registers a MutationObserver on document; we detect its presence
+  // by checking whether a dummy <script type="text/tikz"> would be picked up.
+  // The safest heuristic: the external script tag is present and not still loading.
+  const scriptEl = document.querySelector('script[src*="tikzjax"]');
+  if (!scriptEl) return false;
+  // If the script element exists and has been processed (no 'defer' pending),
+  // TikZJax should be active. We cannot check more precisely without internals.
+  return true;
+}
+
+/**
  * Wait for an SVG element inside a container (created by TikZJax).
  * Uses MutationObserver for instant detection instead of rAF polling.
+ * Fails fast if TikZJax is not loaded or if a TikZJax error is detected.
  */
 export function waitForTikzSvg(container: HTMLElement, timeoutMs: number): Promise<SVGSVGElement | null> {
   return new Promise((resolve) => {
+    // Fail fast if TikZJax script is missing entirely
+    if (!isTikzJaxLoaded()) {
+      console.warn('TikZJax script not found in document — cannot render TikZ');
+      resolve(null);
+      return;
+    }
+
     // Check immediately in case SVG is already present
     const existing = container.querySelector('svg');
     if (existing) { resolve(existing); return; }
 
     let settled = false;
+
+    const settle = (svg: SVGSVGElement | null) => {
+      if (settled) return;
+      settled = true;
+      observer.disconnect();
+      clearTimeout(timer);
+      resolve(svg);
+    };
+
     const observer = new MutationObserver(() => {
+      // Success: SVG rendered
       const svg = container.querySelector('svg');
-      if (svg && !settled) {
-        settled = true;
-        observer.disconnect();
-        clearTimeout(timer);
-        resolve(svg);
+      if (svg) { settle(svg); return; }
+
+      // Early error detection: TikZJax may replace the script with an error
+      // message or remove it without producing an SVG. If the script element
+      // is gone and there's no SVG, compilation failed.
+      const script = container.querySelector('script[type="text/tikz"]');
+      if (!script && !container.querySelector('svg')) {
+        console.warn('TikZJax removed script without producing SVG — compile error');
+        settle(null);
       }
     });
 
-    const timer = setTimeout(() => {
-      if (!settled) {
-        settled = true;
-        observer.disconnect();
-        resolve(null);
-      }
-    }, timeoutMs);
+    const timer = setTimeout(() => { settle(null); }, timeoutMs);
 
     observer.observe(container, { childList: true, subtree: true });
   });

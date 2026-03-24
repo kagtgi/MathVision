@@ -8,7 +8,6 @@ import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import { motion } from 'framer-motion';
 import PdfToDocxConverter from './PdfToDocxConverter';
-import { generateTikzMultiAgent, extractTikzCode } from './utils/tikzMultiAgent';
 import { waitForTikzSvg, preprocessTikzForTikzJax } from './utils/latexToImage';
 import { GEMINI_MODEL, LATEX_MATH_RULES, ANTI_HALLUCINATION, OUTPUT_FORMAT_RULES, TIKZJAX_COMPAT_RULES } from './utils/sharedPrompts';
 
@@ -16,54 +15,87 @@ type AppMode = 'image-to-latex' | 'pdf-to-docx';
 
 const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20MB
 
-const SYSTEM_INSTRUCTION = `You are MathVision, an expert assistant for mathematics teachers in Vietnam.
-Convert handwritten or printed math content from images into clean LaTeX.
+const SYSTEM_INSTRUCTION = `You are MathVision, an expert LaTeX assistant for Vietnamese math teachers.
+Analyze the image and output compilable LaTeX/TikZ code — nothing else.
 
-## Rules
-- Respond in the same language the teacher uses (Vietnamese or English).
-- Be concise — output ONLY the code block(s), no prose, no preamble.
-- Never simplify, solve, or alter the math — reproduce exactly what is shown.
-- If the image is unreadable or contains no math, say so in one sentence only.
-- Preserve Vietnamese text exactly as shown (UTF-8).
-${ANTI_HALLUCINATION}
+## STEP 1 — Classify
+Determine what the image contains:
+- TYPE A: Geometric figure (shapes, triangles, circles, lines, coordinate axes, graphs)
+- TYPE B: Math formulas, expressions, equations, text with math
+- BOTH: contains a geometric figure AND formulas/text
 
-## Step 1 — Classify the image content
-Determine what the image contains. There are exactly two categories:
-- TYPE A — GEOMETRIC FIGURE (shapes, diagrams, coordinate systems, graphs)
-- TYPE B — FORMULA / EXPRESSION (equations, integrals, matrices, etc.)
-If BOTH present, output both (TikZ block first, then LaTeX block).
+## STEP 2A — For TYPE A (Geometric Figure) → TikZ code
 
-## Step 2A — Geometric figures → TikZ code
+Output a complete TikZ figure in a single \`\`\`latex code block.
 
-Output a complete, compilable TikZ figure inside a \`\`\`latex code block.
-The multi-agent pipeline will refine it, but make a best effort:
+REQUIRED STRUCTURE:
+\`\`\`latex
+% \\usepackage{tikz}
+% \\usetikzlibrary{angles, quotes, calc, decorations.markings}
 
-- Wrap in \\begin{tikzpicture}[scale=1]...\\end{tikzpicture}
-- Declare \\usetikzlibrary{...} as comments at the top
-- Use named \\coordinate for every point BEFORE using it
-- Mark every labeled point: \\fill (A) circle (1.5pt); \\node[anchor] at (A) {$A$};
-- All math labels in $...$
-- [thick] for main edges, [dashed] for construction lines
-- Right angles: \\pic[draw] {right angle = A--H--B};
-- Angle arcs: \\pic[draw, angle radius=8pt, "$\\alpha$", angle eccentricity=1.5] {angle = C--B--A};
-- Equal-segment ticks: decorations.markings
-- Fit in [0,6]×[0,6], scale=1 default
-- Do NOT add elements not visible in the image.
+\\begin{tikzpicture}[scale=1]
+  % --- coordinates ---
+  \\coordinate (A) at (0, 0);
+  \\coordinate (B) at (4, 0);
+
+  % --- edges ---
+  \\draw[thick] (A) -- (B);
+
+  % --- labels ---
+  \\fill (A) circle (1.5pt);
+  \\node[below left] at (A) {$A$};
+\\end{tikzpicture}
+\`\`\`
+
+RULES for TikZ (non-negotiable):
+1. Declare ALL \\coordinate BEFORE any use — order matters.
+2. Every visible labeled point: \\fill (X) circle (1.5pt); \\node[anchor] at (X) {$X$};
+3. All math in node labels must be wrapped in $...$
+4. [thick] for primary edges; [dashed] for auxiliary/construction lines.
+5. Right-angle marks: draw a small square manually or use \\pic[draw]{right angle = A--H--B}; (requires angles library).
+6. Angle arcs with label: \\pic["$\\alpha$", draw, angle radius=8mm, angle eccentricity=1.6]{angle = C--B--A}; (requires angles, quotes).
+7. Equal-segment ticks: use decorations.markings with a tick mark pattern.
+8. Fit the whole figure inside [0, 6]×[0, 6]. Adjust coordinates to match image proportions.
+9. Only declare libraries you actually use.
+10. Do NOT draw anything not visible in the image.
 ${TIKZJAX_COMPAT_RULES}
 
-## Step 2B — Formulas → LaTeX
+## STEP 2B — For TYPE B (Formulas/Text) → LaTeX expressions
 
-- Wrap ALL math in $...$. One $...$ per line for multi-line derivations.
-- Never use \\[ \\], align, align*, equation, gather, or display environments.
-- Plain text (labels, problem numbers) → as-is, no LaTeX wrapper.
-- Never use \\textbf, \\textit, \\emph, \\color.
+Output ALL math expressions in a single \`\`\`latex code block, one per line:
+
+\`\`\`latex
+$expression_1$
+$expression_2$
+plain text (no dollar signs)
+\`\`\`
+
+RULES for formulas:
+- Every math expression wrapped in $...$
+- Fractions: \\frac{a}{b} — NEVER write a/b
+- Roots: \\sqrt{x}, \\sqrt[3]{8}
+- Vietnamese angles: \\widehat{ABC} (default) or \\angle ABC
+- Degrees: $60{}^\\circ$ — always use {}^\\circ
+- Absolute value: $\\left| x \\right|$
+- Brackets: always \\left( \\right), \\left[ \\right], \\left\\{ \\right\\}
+- Derivatives: $\\{f\\}'(x)$, $\\{y\\}''$
+- Vietnamese decimals: $3{,}14$
+- Vectors/rays: \\overrightarrow{AB}; segments: $AB$
+- Never use \\[ \\], align, equation, gather, or any display environment
+- Never use \\textbf, \\textit, \\emph, \\color
+- Plain text labels or problem numbers → outside $...$
 ${LATEX_MATH_RULES}
 
-## Output format — STRICT
-- Output ONLY code block(s) — no explanation before or after.
-- If both types: TikZ block first, then LaTeX block.
-- Never say "Here is..." or "The code is..." — just output the code.
-- Every response must start with either \`\`\`latex or a plain text line from the image.
+## STEP 2C — For BOTH → Two separate code blocks
+
+First output the TikZ \`\`\`latex block, then the formula \`\`\`latex block.
+
+## OUTPUT FORMAT — ABSOLUTE RULES
+- Output ONLY the \`\`\`latex code block(s). Zero prose. Zero explanation.
+- Do NOT say "Here is...", "The code is...", "Note:", or anything outside the blocks.
+- If image is unreadable or has no math: output exactly one line → Không đọc được ảnh.
+- Never start with anything other than \`\`\`latex or the above error line.
+${ANTI_HALLUCINATION}
 ${OUTPUT_FORMAT_RULES}`;
 
 export default function App() {
@@ -164,9 +196,8 @@ export default function App() {
       const mimeTypeMatch = imagePreview.match(/^data:(image\/[a-zA-Z]*);base64,/);
       const mimeType = mimeTypeMatch ? mimeTypeMatch[1] : 'image/jpeg';
 
-      // Phase 1: Single call — classify + extract in one pass
       setProcessingStatus('Processing image with AI...');
-      setProcessingLog((prev) => [...prev, 'Sending image to Gemini Pro for analysis...']);
+      setProcessingLog((prev) => [...prev, 'Sending image to Gemini for analysis...']);
 
       const response = await ai.models.generateContent({
         model: GEMINI_MODEL,
@@ -175,62 +206,22 @@ export default function App() {
           parts: [
             { text: SYSTEM_INSTRUCTION },
             { inlineData: { data: base64Data, mimeType: mimeType || 'image/jpeg' } },
-            { text: 'Process this image according to the instructions above.' },
+            { text: 'Convert this image to LaTeX/TikZ code following the instructions above.' },
           ],
         }],
-        config: { temperature: 0.2 },
+        config: { temperature: 0.15 },
       });
 
-      let output = response.text || '';
+      const output = response.text || '';
       if (!output) {
         setError("No text returned from the model.");
         return;
       }
 
-      setProcessingLog((prev) => [...prev, 'Initial analysis complete.']);
-
-      // Phase 2: If TikZ code was produced, enhance it via multi-agent pipeline
-      const hasTikz = output.includes('\\begin{tikzpicture}');
-      if (hasTikz) {
-        setProcessingStatus('Enhancing TikZ with multi-agent pipeline...');
-        setProcessingLog((prev) => [...prev, 'Geometric figure detected — running Draft B + Verify pipeline...']);
-
-        // Extract the initial TikZ as Draft A — avoids regenerating it from scratch
-        const initialDraftA = extractTikzCode(output);
-
-        try {
-          const tikzResult = await generateTikzMultiAgent(
-            apiKey,
-            base64Data,
-            mimeType || 'image/jpeg',
-            {
-              onProgress: (_stage, detail) => {
-                setProcessingStatus(detail);
-                setProcessingLog((prev) => [...prev, detail]);
-              },
-              draftA: initialDraftA,
-            },
-          );
-
-          if (tikzResult.log.length > 0) {
-            setProcessingLog((prev) => [...prev, ...tikzResult.log]);
-          }
-
-          // Replace the initial TikZ block with the enhanced version
-          const enhancedTikz = '```latex\n' + tikzResult.tikzCode + '\n```';
-          // Remove the original tikz code block and replace
-          output = output.replace(/```latex\s*\n(?:% Required[\s\S]*?)?\\begin\{tikzpicture\}[\s\S]*?\\end\{tikzpicture\}\s*\n```/g, enhancedTikz);
-
-          // If replacement didn't work (different format), prepend
-          if (!output.includes(tikzResult.tikzCode)) {
-            const formulaPart = output.replace(/```latex\s*\n[\s\S]*?\\begin\{tikzpicture\}[\s\S]*?\\end\{tikzpicture\}\s*\n```/g, '').trim();
-            output = [enhancedTikz, formulaPart].filter(Boolean).join('\n\n');
-          }
-        } catch (tikzErr) {
-          console.warn('Multi-agent TikZ enhancement failed, keeping initial output:', tikzErr);
-          setProcessingLog((prev) => [...prev, 'Multi-agent enhancement failed — keeping initial TikZ output.']);
-        }
-      }
+      setProcessingLog((prev) => [
+        ...prev,
+        output.includes('\\begin{tikzpicture}') ? 'Geometric figure detected — TikZ code generated.' : 'Formula/text content detected — LaTeX code generated.',
+      ]);
 
       setResult(output);
     } catch (err: unknown) {
@@ -753,7 +744,7 @@ const TIKZ_DOM_TIMEOUT_MS = 30_000; // Match TIKZ_RENDER_TIMEOUT_MS; complex fig
 function TikzRendererWithRef({ code, onImageReady }: { code: string, onImageReady?: (dataUrl: string | null) => void }) {
   const [pngDataUrl, setPngDataUrl] = useState<string | null>(null);
   const [isRendering, setIsRendering] = useState(true);
-  const [renderError, setRenderError] = useState(false);
+  const [renderError, setRenderError] = useState<'timeout' | 'compile' | null>(null);
   const onImageReadyRef = useRef(onImageReady);
   onImageReadyRef.current = onImageReady;
 
@@ -779,7 +770,8 @@ function TikzRendererWithRef({ code, onImageReady }: { code: string, onImageRead
         // waiting for component unmount, to avoid accumulating DOM nodes.
         if (renderDiv.parentNode) document.body.removeChild(renderDiv);
         setIsRendering(false);
-        setRenderError(true);
+        // Distinguish between compile error (script removed, no SVG) and timeout
+        setRenderError('timeout');
         onImageReadyRef.current?.(null);
         return;
       }
@@ -838,9 +830,15 @@ function TikzRendererWithRef({ code, onImageReady }: { code: string, onImageRead
       ) : pngDataUrl ? (
         <img src={pngDataUrl} alt="TikZ figure" className="max-w-full h-auto" />
       ) : (
-        <div className="flex items-center justify-center w-full h-48 text-red-400">
-          <span className="text-sm font-sans-brand">
-            {renderError ? 'Rendering timed out — TikZ code may be invalid' : 'Failed to render figure'}
+        <div className="flex flex-col items-center justify-center w-full min-h-[120px] p-4 gap-2 text-red-400">
+          <AlertCircle className="w-5 h-5 shrink-0" />
+          <span className="text-sm font-sans-brand text-center">
+            {renderError === 'timeout'
+              ? 'TikZ rendering timed out — the code may contain unsupported PGF functions.'
+              : 'TikZ compile error — check the code below for syntax issues.'}
+          </span>
+          <span className="text-xs text-[#00186E]/40 font-sans-brand text-center">
+            The TikZ source code is shown below. You can copy it and compile locally with pdflatex.
           </span>
         </div>
       )}

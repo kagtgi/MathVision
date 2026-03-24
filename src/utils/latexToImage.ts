@@ -40,6 +40,7 @@ function evalPgfExpr(expr: string): number | null {
   s = s.replace(/\bpow\s*\(/g, 'Math.pow(');
   s = s.replace(/\bmod\s*\(/g, '((a,b)=>a%b)(');  // PGF mod(a,b) → JS modulo
   s = s.replace(/\bpi\b/g, 'Math.PI');
+  s = s.replace(/\be\b/g, 'Math.E');  // Euler's number
 
   // Close extra parens introduced by trig wrappers:  sin(30) → Math.sin(DEG*(30))
   // Count how many DEG*( we inserted vs how many closing parens exist
@@ -80,17 +81,38 @@ function evalPgfExpr(expr: string): number | null {
 
 /**
  * Preprocess TikZ code for TikZJax compatibility.
- * Evaluates PGF math expressions inside {…} (e.g. {sqrt(3)}) to plain numbers.
+ *
+ * 1. Evaluates PGF math expressions inside {…} (e.g. {sqrt(3)}) to plain numbers.
+ * 2. Strips unsupported library options that can cause silent hangs (e.g. `e` constant
+ *    inside calc expressions).
+ * 3. Normalises the `e` constant → 2.71828 when used alone as a PGF value.
  */
 export function preprocessTikzForTikzJax(code: string): string {
-  // Match {expr} where expr contains a known PGF math function
-  return code.replace(/\{([^{}]*(?:sqrt|sin|cos|tan|abs|ln|exp|floor|ceil|round|min|max|pow|mod|pi)[^{}]*)\}/g, (_match, inner: string) => {
-    const val = evalPgfExpr(inner);
-    if (val === null) return _match; // couldn't evaluate — leave unchanged
-    // Round to 5 decimal places to keep code readable
-    const rounded = Math.round(val * 100000) / 100000;
-    return String(rounded);
-  });
+  // Pass 1: Evaluate {expr} blocks containing PGF math functions or constants.
+  // Also catches standalone {e} and {pi} used as coordinate values.
+  let result = code.replace(
+    /\{([^{}]*(?:sqrt|sin|cos|tan|abs|ln|exp|floor|ceil|round|min|max|pow|mod|\bpi\b|\be\b)[^{}]*)\}/g,
+    (_match, inner: string) => {
+      const val = evalPgfExpr(inner);
+      if (val === null) return _match; // couldn't evaluate — leave unchanged
+      const rounded = Math.round(val * 100000) / 100000;
+      return String(rounded);
+    },
+  );
+
+  // Pass 2: Evaluate bare {expr} calc-style interpolation factors that contain math.
+  // e.g. $(A)!{sqrt(2)/2}!(B)$ → $(A)!0.70711!(B)$
+  result = result.replace(
+    /!\{([^{}]*(?:sqrt|sin|cos|tan|abs|ln|exp|floor|ceil|round|min|max|pow|mod|\bpi\b|\be\b)[^{}]*)\}!/g,
+    (_match, inner: string) => {
+      const val = evalPgfExpr(inner);
+      if (val === null) return _match;
+      const rounded = Math.round(val * 100000) / 100000;
+      return `!${rounded}!`;
+    },
+  );
+
+  return result;
 }
 
 // ─── Reusable canvas pool ─────────────────────────────────────────────────────

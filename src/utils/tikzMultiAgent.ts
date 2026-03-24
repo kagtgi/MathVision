@@ -306,7 +306,6 @@ export async function generateTikzMultiAgent(
 
   return {
     tikzCode: finalCode,
-    description: '',
     candidates,
     reasoning,
     log,

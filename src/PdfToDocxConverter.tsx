@@ -292,7 +292,7 @@ function buildDocx(pages: PageContent[], fileName: string): DocxDocument {
 
         case 'table': {
           if (!el.rows || el.rows.length === 0) break;
-          const tableRows = el.rows.map((row, rowIdx) => {
+          const tableRows = el.rows.map((row) => {
             const cells = row.map((cellText) => {
               const cellChildren = buildDocxParagraphChildren(cellText || '');
               return new TableCell({

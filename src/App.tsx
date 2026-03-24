@@ -1,14 +1,12 @@
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { GoogleGenAI } from '@google/genai';
 import { Upload, Image as ImageIcon, Loader2, Copy, CheckCircle2, AlertCircle, Key, ImageDown, Eye, Code, FileText, ArrowRightLeft } from 'lucide-react';
 import { useDropzone } from 'react-dropzone';
 import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import { motion } from 'framer-motion';
 import PdfToDocxConverter from './PdfToDocxConverter';
-import { generateTikzMultiAgent, extractTikzCode } from './utils/tikzMultiAgent';
 import { waitForTikzSvg, preprocessTikzForTikzJax } from './utils/latexToImage';
 import { GEMINI_MODEL, LATEX_MATH_RULES, ANTI_HALLUCINATION, OUTPUT_FORMAT_RULES, TIKZJAX_COMPAT_RULES } from './utils/sharedPrompts';
 
@@ -16,54 +14,87 @@ type AppMode = 'image-to-latex' | 'pdf-to-docx';
 
 const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20MB
 
-const SYSTEM_INSTRUCTION = `You are MathVision, an expert assistant for mathematics teachers in Vietnam.
-Convert handwritten or printed math content from images into clean LaTeX.
+const SYSTEM_INSTRUCTION = `You are MathVision, an expert LaTeX assistant for Vietnamese math teachers.
+Analyze the image and output compilable LaTeX/TikZ code — nothing else.
 
-## Rules
-- Respond in the same language the teacher uses (Vietnamese or English).
-- Be concise — output ONLY the code block(s), no prose, no preamble.
-- Never simplify, solve, or alter the math — reproduce exactly what is shown.
-- If the image is unreadable or contains no math, say so in one sentence only.
-- Preserve Vietnamese text exactly as shown (UTF-8).
-${ANTI_HALLUCINATION}
+## STEP 1 — Classify
+Determine what the image contains:
+- TYPE A: Geometric figure (shapes, triangles, circles, lines, coordinate axes, graphs)
+- TYPE B: Math formulas, expressions, equations, text with math
+- BOTH: contains a geometric figure AND formulas/text
 
-## Step 1 — Classify the image content
-Determine what the image contains. There are exactly two categories:
-- TYPE A — GEOMETRIC FIGURE (shapes, diagrams, coordinate systems, graphs)
-- TYPE B — FORMULA / EXPRESSION (equations, integrals, matrices, etc.)
-If BOTH present, output both (TikZ block first, then LaTeX block).
+## STEP 2A — For TYPE A (Geometric Figure) → TikZ code
 
-## Step 2A — Geometric figures → TikZ code
+Output a complete TikZ figure in a single \`\`\`latex code block.
 
-Output a complete, compilable TikZ figure inside a \`\`\`latex code block.
-The multi-agent pipeline will refine it, but make a best effort:
+REQUIRED STRUCTURE:
+\`\`\`latex
+% \\usepackage{tikz}
+% \\usetikzlibrary{angles, quotes, calc, decorations.markings}
 
-- Wrap in \\begin{tikzpicture}[scale=1]...\\end{tikzpicture}
-- Declare \\usetikzlibrary{...} as comments at the top
-- Use named \\coordinate for every point BEFORE using it
-- Mark every labeled point: \\fill (A) circle (1.5pt); \\node[anchor] at (A) {$A$};
-- All math labels in $...$
-- [thick] for main edges, [dashed] for construction lines
-- Right angles: \\pic[draw] {right angle = A--H--B};
-- Angle arcs: \\pic[draw, angle radius=8pt, "$\\alpha$", angle eccentricity=1.5] {angle = C--B--A};
-- Equal-segment ticks: decorations.markings
-- Fit in [0,6]×[0,6], scale=1 default
-- Do NOT add elements not visible in the image.
+\\begin{tikzpicture}[scale=1]
+  % --- coordinates ---
+  \\coordinate (A) at (0, 0);
+  \\coordinate (B) at (4, 0);
+
+  % --- edges ---
+  \\draw[thick] (A) -- (B);
+
+  % --- labels ---
+  \\fill (A) circle (1.5pt);
+  \\node[below left] at (A) {$A$};
+\\end{tikzpicture}
+\`\`\`
+
+RULES for TikZ (non-negotiable):
+1. Declare ALL \\coordinate BEFORE any use — order matters.
+2. Every visible labeled point: \\fill (X) circle (1.5pt); \\node[anchor] at (X) {$X$};
+3. All math in node labels must be wrapped in $...$
+4. [thick] for primary edges; [dashed] for auxiliary/construction lines.
+5. Right-angle marks: draw a small square manually or use \\pic[draw]{right angle = A--H--B}; (requires angles library).
+6. Angle arcs with label: \\pic["$\\alpha$", draw, angle radius=8mm, angle eccentricity=1.6]{angle = C--B--A}; (requires angles, quotes).
+7. Equal-segment ticks: use decorations.markings with a tick mark pattern.
+8. Fit the whole figure inside [0, 6]×[0, 6]. Adjust coordinates to match image proportions.
+9. Only declare libraries you actually use.
+10. Do NOT draw anything not visible in the image.
 ${TIKZJAX_COMPAT_RULES}
 
-## Step 2B — Formulas → LaTeX
+## STEP 2B — For TYPE B (Formulas/Text) → LaTeX expressions
 
-- Wrap ALL math in $...$. One $...$ per line for multi-line derivations.
-- Never use \\[ \\], align, align*, equation, gather, or display environments.
-- Plain text (labels, problem numbers) → as-is, no LaTeX wrapper.
-- Never use \\textbf, \\textit, \\emph, \\color.
+Output ALL math expressions in a single \`\`\`latex code block, one per line:
+
+\`\`\`latex
+$expression_1$
+$expression_2$
+plain text (no dollar signs)
+\`\`\`
+
+RULES for formulas:
+- Every math expression wrapped in $...$
+- Fractions: \\frac{a}{b} — NEVER write a/b
+- Roots: \\sqrt{x}, \\sqrt[3]{8}
+- Vietnamese angles: \\widehat{ABC} (default) or \\angle ABC
+- Degrees: $60{}^\\circ$ — always use {}^\\circ
+- Absolute value: $\\left| x \\right|$
+- Brackets: always \\left( \\right), \\left[ \\right], \\left\\{ \\right\\}
+- Derivatives: $\\{f\\}'(x)$, $\\{y\\}''$
+- Vietnamese decimals: $3{,}14$
+- Vectors/rays: \\overrightarrow{AB}; segments: $AB$
+- Never use \\[ \\], align, equation, gather, or any display environment
+- Never use \\textbf, \\textit, \\emph, \\color
+- Plain text labels or problem numbers → outside $...$
 ${LATEX_MATH_RULES}
 
-## Output format — STRICT
-- Output ONLY code block(s) — no explanation before or after.
-- If both types: TikZ block first, then LaTeX block.
-- Never say "Here is..." or "The code is..." — just output the code.
-- Every response must start with either \`\`\`latex or a plain text line from the image.
+## STEP 2C — For BOTH → Two separate code blocks
+
+First output the TikZ \`\`\`latex block, then the formula \`\`\`latex block.
+
+## OUTPUT FORMAT — ABSOLUTE RULES
+- Output ONLY the \`\`\`latex code block(s). Zero prose. Zero explanation.
+- Do NOT say "Here is...", "The code is...", "Note:", or anything outside the blocks.
+- If image is unreadable or has no math: output exactly one line → Không đọc được ảnh.
+- Never start with anything other than \`\`\`latex or the above error line.
+${ANTI_HALLUCINATION}
 ${OUTPUT_FORMAT_RULES}`;
 
 export default function App() {
@@ -74,7 +105,6 @@ export default function App() {
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [processingStatus, setProcessingStatus] = useState('');
-  const [processingLog, setProcessingLog] = useState<string[]>([]);
   const [result, setResult] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -150,8 +180,7 @@ export default function App() {
     setIsProcessing(true);
     setError(null);
     setResult(null);
-    setProcessingStatus('Analyzing image...');
-    setProcessingLog([]);
+    setProcessingStatus('Sending image to AI…');
 
     try {
       if (!apiKey) {
@@ -161,12 +190,8 @@ export default function App() {
       const ai = new GoogleGenAI({ apiKey });
 
       const base64Data = imagePreview.split(',')[1];
-      const mimeTypeMatch = imagePreview.match(/^data:(image\/[a-zA-Z]*);base64,/);
+      const mimeTypeMatch = imagePreview.match(/^data:(image\/[\w+.-]+);base64,/);
       const mimeType = mimeTypeMatch ? mimeTypeMatch[1] : 'image/jpeg';
-
-      // Phase 1: Single call — classify + extract in one pass
-      setProcessingStatus('Processing image with AI...');
-      setProcessingLog((prev) => [...prev, 'Sending image to Gemini Pro for analysis...']);
 
       const response = await ai.models.generateContent({
         model: GEMINI_MODEL,
@@ -174,62 +199,17 @@ export default function App() {
           role: 'user',
           parts: [
             { text: SYSTEM_INSTRUCTION },
-            { inlineData: { data: base64Data, mimeType: mimeType || 'image/jpeg' } },
-            { text: 'Process this image according to the instructions above.' },
+            { inlineData: { data: base64Data, mimeType } },
+            { text: 'Convert this image to LaTeX/TikZ code following the instructions above.' },
           ],
         }],
-        config: { temperature: 0.2 },
+        config: { temperature: 0.15 },
       });
 
-      let output = response.text || '';
+      const output = response.text?.trim() || '';
       if (!output) {
-        setError("No text returned from the model.");
+        setError("The model returned an empty response. Please try again.");
         return;
-      }
-
-      setProcessingLog((prev) => [...prev, 'Initial analysis complete.']);
-
-      // Phase 2: If TikZ code was produced, enhance it via multi-agent pipeline
-      const hasTikz = output.includes('\\begin{tikzpicture}');
-      if (hasTikz) {
-        setProcessingStatus('Enhancing TikZ with multi-agent pipeline...');
-        setProcessingLog((prev) => [...prev, 'Geometric figure detected — running Draft B + Verify pipeline...']);
-
-        // Extract the initial TikZ as Draft A — avoids regenerating it from scratch
-        const initialDraftA = extractTikzCode(output);
-
-        try {
-          const tikzResult = await generateTikzMultiAgent(
-            apiKey,
-            base64Data,
-            mimeType || 'image/jpeg',
-            {
-              onProgress: (_stage, detail) => {
-                setProcessingStatus(detail);
-                setProcessingLog((prev) => [...prev, detail]);
-              },
-              draftA: initialDraftA,
-            },
-          );
-
-          if (tikzResult.log.length > 0) {
-            setProcessingLog((prev) => [...prev, ...tikzResult.log]);
-          }
-
-          // Replace the initial TikZ block with the enhanced version
-          const enhancedTikz = '```latex\n' + tikzResult.tikzCode + '\n```';
-          // Remove the original tikz code block and replace
-          output = output.replace(/```latex\s*\n(?:% Required[\s\S]*?)?\\begin\{tikzpicture\}[\s\S]*?\\end\{tikzpicture\}\s*\n```/g, enhancedTikz);
-
-          // If replacement didn't work (different format), prepend
-          if (!output.includes(tikzResult.tikzCode)) {
-            const formulaPart = output.replace(/```latex\s*\n[\s\S]*?\\begin\{tikzpicture\}[\s\S]*?\\end\{tikzpicture\}\s*\n```/g, '').trim();
-            output = [enhancedTikz, formulaPart].filter(Boolean).join('\n\n');
-          }
-        } catch (tikzErr) {
-          console.warn('Multi-agent TikZ enhancement failed, keeping initial output:', tikzErr);
-          setProcessingLog((prev) => [...prev, 'Multi-agent enhancement failed — keeping initial TikZ output.']);
-        }
       }
 
       setResult(output);
@@ -423,12 +403,12 @@ export default function App() {
                         {isProcessing ? (
                           <>
                             <Loader2 className="w-5 h-5 animate-spin" />
-                            Processing Image...
+                            Converting…
                           </>
+                        ) : result ? (
+                          'Convert Again'
                         ) : (
-                          <>
-                            Convert to LaTeX
-                          </>
+                          'Convert to LaTeX'
                         )}
                       </button>
                     </div>
@@ -451,54 +431,53 @@ export default function App() {
             {/* Right Column — Output */}
             <div className="lg:sticky lg:top-24">
               <div className="bg-white rounded-2xl shadow-sm border border-[#00186E]/10 min-h-[400px] lg:min-h-[calc(100vh-8rem)] flex flex-col overflow-hidden">
-                <div className="p-4 border-b border-[#00186E]/5 bg-[#00186E]/[0.02] flex items-center justify-between">
-                  <h2 className="font-medium text-[#00186E] flex items-center gap-2 font-sans-brand">
-                    Output
-                  </h2>
+                <div className="px-4 py-3 border-b border-[#00186E]/5 bg-[#00186E]/[0.02] flex items-center justify-between">
+                  <h2 className="font-medium text-[#00186E] font-sans-brand text-sm">Output</h2>
+                  {result && !isProcessing && (
+                    <button
+                      onClick={() => { setResult(null); setError(null); }}
+                      className="text-xs text-[#00186E]/40 hover:text-[#00186E] border border-[#00186E]/15 hover:border-[#00186E]/30 rounded-lg px-2.5 py-1 transition-colors font-sans-brand"
+                    >
+                      Clear
+                    </button>
+                  )}
                 </div>
 
-                <div className="flex-1 p-0 overflow-y-auto">
+                <div className="flex-1 overflow-y-auto">
                   {isProcessing ? (
-                    <div className="h-full flex flex-col items-center justify-center text-[#00186E]/40 space-y-4 p-8">
-                      <Loader2 className="w-10 h-10 animate-spin text-[#FFAD1D]" />
-                      <p className="text-sm font-medium animate-pulse font-sans-brand">{processingStatus || 'Analyzing math content and generating LaTeX...'}</p>
-                      {/* Reasoning log */}
-                      {processingLog.length > 0 && (
-                        <div className="w-full max-w-md bg-[#00186E]/[0.03] rounded-lg border border-[#00186E]/10 p-3 max-h-40 overflow-y-auto text-left">
-                          <p className="text-[10px] font-semibold text-[#00186E]/40 uppercase tracking-wider mb-1.5 font-sans-brand">
-                            Agent reasoning
-                          </p>
-                          <div className="space-y-0.5">
-                            {processingLog.map((line, i) => (
-                              <p key={i} className="text-xs text-[#00186E]/50 font-sans-brand">
-                                {line}
-                              </p>
-                            ))}
-                          </div>
-                        </div>
-                      )}
+                    <div className="h-full flex flex-col items-center justify-center text-[#00186E]/40 gap-3 p-8">
+                      <Loader2 className="w-9 h-9 animate-spin text-[#FFAD1D]" />
+                      <p className="text-sm font-medium font-sans-brand text-[#00186E]/60">
+                        {processingStatus || 'Analyzing image…'}
+                      </p>
                     </div>
                   ) : error ? (
-                    <div className="p-6">
+                    <div className="p-4">
                       <div className="bg-red-50 text-red-800 rounded-xl p-4 flex items-start gap-3 border border-red-100">
                         <AlertCircle className="w-5 h-5 text-red-500 shrink-0 mt-0.5" />
-                        <div>
-                          <h3 className="font-medium mb-1 font-sans-brand">Error processing image</h3>
-                          <p className="text-sm text-red-700/90">{error}</p>
+                        <div className="flex-1 min-w-0">
+                          <p className="font-medium mb-1 font-sans-brand text-sm">Error</p>
+                          <p className="text-sm text-red-700/90 font-sans-brand">{error}</p>
+                          <button
+                            onClick={processImage}
+                            className="mt-3 text-xs font-medium text-red-700 hover:text-red-900 underline underline-offset-2 font-sans-brand"
+                          >
+                            Try again
+                          </button>
                         </div>
                       </div>
                     </div>
                   ) : result ? (
-                    <div className="p-6">
+                    <div className="p-4">
                       <ResultRenderer content={result} />
                     </div>
                   ) : (
                     <div className="h-full flex flex-col items-center justify-center text-[#00186E]/30 p-8 text-center">
-                      <div className="w-16 h-16 bg-[#00186E]/5 rounded-full flex items-center justify-center mb-4">
-                        <span className="text-2xl font-serif-brand italic text-[#00186E]/20">f(x)</span>
+                      <div className="w-14 h-14 bg-[#00186E]/5 rounded-full flex items-center justify-center mb-3">
+                        <span className="text-xl font-serif-brand italic text-[#00186E]/20">f(x)</span>
                       </div>
-                      <p className="text-sm font-medium text-[#00186E]/50 font-sans-brand">No output yet</p>
-                      <p className="text-xs text-[#00186E]/30 mt-1 max-w-xs font-sans-brand">Upload an image and click "Convert to LaTeX" to see the results here.</p>
+                      <p className="text-sm font-medium text-[#00186E]/40 font-sans-brand">No output yet</p>
+                      <p className="text-xs text-[#00186E]/25 mt-1 max-w-xs font-sans-brand">Upload an image and click "Convert to LaTeX".</p>
                     </div>
                   )}
                 </div>
@@ -511,50 +490,118 @@ export default function App() {
   );
 }
 
-// Component to render the markdown result with custom code block styling
+// ─── Output parsing ──────────────────────────────────────────────────────────
+
+/** Extract all ```latex / ```tex fenced code blocks from the AI output. */
+function parseOutputBlocks(content: string): { tikzBlocks: string[]; latexBlocks: string[]; plainText: string } {
+  const tikzBlocks: string[] = [];
+  const latexBlocks: string[] = [];
+
+  const regex = /```(?:latex|tex)\s*\n([\s\S]*?)\n?```/g;
+  let match;
+  while ((match = regex.exec(content)) !== null) {
+    const code = match[1].trim();
+    if (!code) continue;
+    if (code.includes('\\begin{tikzpicture}')) {
+      tikzBlocks.push(code);
+    } else {
+      latexBlocks.push(code);
+    }
+  }
+
+  // Plain text = everything left after stripping code fences
+  const plainText = content.replace(/```(?:latex|tex)\s*\n[\s\S]*?\n?```/g, '').trim();
+
+  return { tikzBlocks, latexBlocks, plainText };
+}
+
+// ─── Top-level result display ─────────────────────────────────────────────────
+
+/**
+ * Renders AI output in a guaranteed layout:
+ *   1. TikZ Preview  (rendered figure)
+ *   2. TikZ Code     (copyable source)
+ *   3. LaTeX Preview (KaTeX rendered formulas)
+ *   4. LaTeX Code    (copyable source)
+ *   5. Plain text    (if no code blocks found — e.g. error message)
+ */
 function ResultRenderer({ content }: { content: string }) {
+  const { tikzBlocks, latexBlocks, plainText } = useMemo(
+    () => parseOutputBlocks(content),
+    [content],
+  );
+
+  const hasBlocks = tikzBlocks.length > 0 || latexBlocks.length > 0;
+
   return (
-    <div className="prose prose-slate prose-sm max-w-none">
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm, remarkMath]}
-        rehypePlugins={[rehypeKatex]}
-        components={{
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          code(props: any) {
-            const { className, children } = props;
-            const match = /language-(\w+)/.exec(className || '');
+    <div>
+      {/* 1+2 — TikZ Preview → TikZ Code */}
+      {tikzBlocks.map((code, i) => (
+        <TikzSection key={`tikz-${i}`} code={code} />
+      ))}
 
-            if (match) {
-              return (
-                <CodeBlock language={match[1]} code={String(children).replace(/\n$/, '')} />
-              );
-            }
+      {/* 3+4 — LaTeX Preview → LaTeX Code */}
+      {latexBlocks.map((code, i) => (
+        <LatexSection key={`latex-${i}`} code={code} />
+      ))}
 
-            return (
-              <code className="bg-[#00186E]/5 text-[#00186E] px-1.5 py-0.5 rounded-md font-mono text-xs">
-                {children}
-              </code>
-            );
-          }
-        }}
-      >
-        {content}
-      </ReactMarkdown>
+      {/* 5 — Plain text (error / unreadable message) */}
+      {!hasBlocks && plainText && (
+        <p className="p-4 text-sm text-[#00186E]/70 font-sans-brand">{plainText}</p>
+      )}
     </div>
   );
 }
 
 
-function FormulaPreview({ code }: { code: string }) {
+// ─── Section components ───────────────────────────────────────────────────────
+
+/** Renders TikZ: Preview → Code (guaranteed order) */
+function TikzSection({ code }: { code: string }) {
+  const [tikzImageUrl, setTikzImageUrl] = useState<string | null>(null);
+
   return (
-    <div className="bg-white p-4 rounded-lg text-[#00186E] overflow-auto prose prose-slate max-w-none border border-[#00186E]/10 min-h-[200px]">
-      <ReactMarkdown
-        remarkPlugins={[remarkMath]}
-        rehypePlugins={[rehypeKatex]}
+    <>
+      <PreviewBlock
+        title="TikZ Preview"
+        icon={<Eye className="w-3.5 h-3.5 mr-1" />}
+        actions={
+          tikzImageUrl ? (
+            <div className="flex items-center gap-3">
+              <DownloadImageButton imageDataUrl={tikzImageUrl} />
+              <CopyImageButton imageDataUrl={tikzImageUrl} />
+            </div>
+          ) : undefined
+        }
       >
-        {code}
-      </ReactMarkdown>
-    </div>
+        <TikzRendererWithRef code={code} onImageReady={setTikzImageUrl} />
+      </PreviewBlock>
+
+      <CodeBlockPanel label="TikZ Code" code={code} />
+    </>
+  );
+}
+
+/** Renders LaTeX formulas: Preview → Code (guaranteed order) */
+function LatexSection({ code }: { code: string }) {
+  return (
+    <>
+      <PreviewBlock
+        title="LaTeX Preview"
+        icon={<Eye className="w-3.5 h-3.5 mr-1" />}
+      >
+        <div className="text-[#00186E] overflow-auto prose prose-slate max-w-none">
+          <ReactMarkdown
+            remarkPlugins={[remarkMath]}
+            rehypePlugins={[rehypeKatex]}
+          >
+            {code}
+          </ReactMarkdown>
+        </div>
+      </PreviewBlock>
+
+      <CodeBlockPanel label="LaTeX Code" code={code} />
+    </>
   );
 }
 
@@ -665,7 +712,7 @@ function CopyImageButton({ imageDataUrl }: { imageDataUrl: string }) {
 
 function PreviewBlock({ title, icon, children, actions }: { title: string, icon: React.ReactNode, children: React.ReactNode, actions?: React.ReactNode }) {
   return (
-    <div className="my-4 rounded-xl overflow-hidden border border-[#00186E]/20 shadow-sm bg-white">
+    <div className="mb-3 rounded-xl overflow-hidden border border-[#00186E]/20 shadow-sm bg-white">
       <div className="flex items-center justify-between px-4 py-2 bg-[#00186E]/5 border-b border-[#00186E]/10">
         <div className="flex items-center gap-1.5 text-xs font-semibold text-[#00186E]/60 uppercase tracking-wider font-sans-brand">
           {icon}
@@ -682,9 +729,9 @@ function PreviewBlock({ title, icon, children, actions }: { title: string, icon:
 
 function CodeBlockPanel({ label, code }: { label: string, code: string }) {
   return (
-    <div className="my-4 rounded-xl overflow-hidden border border-[#00186E]/20 shadow-sm">
+    <div className="mb-6 rounded-xl overflow-hidden border border-[#00186E]/20 shadow-sm">
       <div className="bg-[#00186E]">
-        <div className="flex items-center justify-between px-4 py-2 bg-[#00186E] border-b border-white/10">
+        <div className="flex items-center justify-between px-4 py-2.5 border-b border-white/10">
           <div className="flex items-center gap-1.5 text-xs font-medium text-white/60 uppercase tracking-wider font-sans-brand">
             <Code className="w-3.5 h-3.5" />
             {label}
@@ -703,62 +750,25 @@ function CodeBlockPanel({ label, code }: { label: string, code: string }) {
   );
 }
 
-function CodeBlock({ language, code }: { language: string, code: string }) {
-  const [tikzImageUrl, setTikzImageUrl] = useState<string | null>(null);
-  const isTikz = code.includes('\\begin{tikzpicture}');
-
-  if (isTikz) {
-    return (
-      <>
-        {/* TikZ Preview Block */}
-        <PreviewBlock
-          title="TikZ Preview"
-          icon={<Eye className="w-3.5 h-3.5 mr-1" />}
-          actions={
-            tikzImageUrl ? (
-              <div className="flex items-center gap-3">
-                <DownloadImageButton imageDataUrl={tikzImageUrl} />
-                <CopyImageButton imageDataUrl={tikzImageUrl} />
-              </div>
-            ) : undefined
-          }
-        >
-          <TikzRendererWithRef code={code} onImageReady={setTikzImageUrl} />
-        </PreviewBlock>
-
-        {/* TikZ Code Block */}
-        <CodeBlockPanel label="TikZ Code" code={code} />
-      </>
-    );
-  }
-
-  return (
-    <>
-      {/* Math Preview Block */}
-      <PreviewBlock
-        title="Math Preview"
-        icon={<Eye className="w-3.5 h-3.5 mr-1" />}
-      >
-        <FormulaPreview code={code} />
-      </PreviewBlock>
-
-      {/* Math Code Block */}
-      <CodeBlockPanel label="LaTeX Code" code={code} />
-    </>
-  );
-}
 
 const TIKZ_DOM_TIMEOUT_MS = 30_000; // Match TIKZ_RENDER_TIMEOUT_MS; complex figures need full 30s
 
 function TikzRendererWithRef({ code, onImageReady }: { code: string, onImageReady?: (dataUrl: string | null) => void }) {
   const [pngDataUrl, setPngDataUrl] = useState<string | null>(null);
   const [isRendering, setIsRendering] = useState(true);
-  const [renderError, setRenderError] = useState(false);
+  const [renderError, setRenderError] = useState<string | null>(null);
   const onImageReadyRef = useRef(onImageReady);
   onImageReadyRef.current = onImageReady;
 
   useEffect(() => {
     let cancelled = false;
+
+    const fail = (msg: string) => {
+      if (cancelled) return;
+      setIsRendering(false);
+      setRenderError(msg);
+      onImageReadyRef.current?.(null);
+    };
 
     const renderDiv = document.createElement('div');
     renderDiv.style.position = 'absolute';
@@ -766,6 +776,10 @@ function TikzRendererWithRef({ code, onImageReady }: { code: string, onImageRead
     renderDiv.style.top = '-9999px';
     renderDiv.style.visibility = 'hidden';
     document.body.appendChild(renderDiv);
+
+    const cleanup = () => {
+      if (renderDiv.parentNode) document.body.removeChild(renderDiv);
+    };
 
     const script = document.createElement('script');
     script.type = 'text/tikz';
@@ -775,12 +789,8 @@ function TikzRendererWithRef({ code, onImageReady }: { code: string, onImageRead
     waitForTikzSvg(renderDiv, TIKZ_DOM_TIMEOUT_MS).then((svg) => {
       if (cancelled) return;
       if (!svg) {
-        // Clean up the off-screen div immediately on failure instead of
-        // waiting for component unmount, to avoid accumulating DOM nodes.
-        if (renderDiv.parentNode) document.body.removeChild(renderDiv);
-        setIsRendering(false);
-        setRenderError(true);
-        onImageReadyRef.current?.(null);
+        cleanup();
+        fail('Preview failed — the TikZ code may contain unsupported syntax. The source is shown below; copy it to compile with pdflatex.');
         return;
       }
 
@@ -793,9 +803,24 @@ function TikzRendererWithRef({ code, onImageReady }: { code: string, onImageRead
       const img = new Image();
       img.onload = () => {
         if (cancelled) { URL.revokeObjectURL(url); return; }
+
+        // Use naturalWidth — for off-DOM images it equals the intrinsic SVG width.
+        // img.width can be 0 when the SVG has no explicit width attribute,
+        // which would produce a blank 0×0 canvas that looks like a silent success.
         const scale = 2;
-        const w = img.width * scale;
-        const h = img.height * scale;
+        const naturalW = img.naturalWidth || img.width;
+        const naturalH = img.naturalHeight || img.height;
+
+        if (!naturalW || !naturalH) {
+          URL.revokeObjectURL(url);
+          cleanup();
+          fail('Rendered SVG has zero dimensions — the figure may be empty.');
+          return;
+        }
+
+        const w = naturalW * scale;
+        const h = naturalH * scale;
+
         // Use a local canvas — multiple TikzRendererWithRef components can
         // be active simultaneously (one per TikZ block in the result).
         // A shared canvas would be corrupted by concurrent img.onload calls.
@@ -807,17 +832,18 @@ function TikzRendererWithRef({ code, onImageReady }: { code: string, onImageRead
         localCtx.fillRect(0, 0, w, h);
         localCtx.drawImage(img, 0, 0, w, h);
         URL.revokeObjectURL(url);
-        // Remove the hidden render container now that the PNG is captured.
-        if (renderDiv.parentNode) document.body.removeChild(renderDiv);
+        cleanup();
         const dataUrl = localCanvas.toDataURL('image/png');
-        setPngDataUrl(dataUrl);
-        setIsRendering(false);
-        onImageReadyRef.current?.(dataUrl);
+        if (!cancelled) {
+          setPngDataUrl(dataUrl);
+          setIsRendering(false);
+          onImageReadyRef.current?.(dataUrl);
+        }
       };
       img.onerror = () => {
         URL.revokeObjectURL(url);
-        if (renderDiv.parentNode) document.body.removeChild(renderDiv);
-        if (!cancelled) { setIsRendering(false); onImageReadyRef.current?.(null); }
+        cleanup();
+        fail('Could not load the rendered SVG — the TikZ code may have errors.');
       };
       img.src = url;
     });
@@ -831,17 +857,19 @@ function TikzRendererWithRef({ code, onImageReady }: { code: string, onImageRead
   return (
     <div className="flex justify-center bg-white rounded-lg overflow-hidden min-h-[200px]">
       {isRendering ? (
-        <div className="flex items-center justify-center w-full h-48 text-[#00186E]/40">
-          <Loader2 className="w-6 h-6 animate-spin mr-2 text-[#FFAD1D]" />
-          <span className="text-sm font-sans-brand">Rendering figure...</span>
+        <div className="flex flex-col items-center justify-center w-full h-48 gap-3 text-[#00186E]/40">
+          <Loader2 className="w-6 h-6 animate-spin text-[#FFAD1D]" />
+          <div className="text-center">
+            <p className="text-sm font-sans-brand">Rendering figure…</p>
+            <p className="text-xs font-sans-brand mt-0.5 text-[#00186E]/30">This can take up to 30 seconds for complex figures.</p>
+          </div>
         </div>
       ) : pngDataUrl ? (
         <img src={pngDataUrl} alt="TikZ figure" className="max-w-full h-auto" />
       ) : (
-        <div className="flex items-center justify-center w-full h-48 text-red-400">
-          <span className="text-sm font-sans-brand">
-            {renderError ? 'Rendering timed out — TikZ code may be invalid' : 'Failed to render figure'}
-          </span>
+        <div className="flex flex-col items-center justify-center w-full min-h-[120px] p-4 gap-2 text-amber-600">
+          <AlertCircle className="w-5 h-5 shrink-0" />
+          <p className="text-sm font-sans-brand text-center">{renderError}</p>
         </div>
       )}
     </div>

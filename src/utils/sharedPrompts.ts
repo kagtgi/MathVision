@@ -85,30 +85,34 @@ CRITICAL — accuracy rules you MUST follow:
 // Using them causes a silent hang until the 30-second timeout.
 
 export const TIKZJAX_COMPAT_RULES = `
-CRITICAL — TikZJax compatibility (MUST follow):
-The TikZ code will be rendered in a BROWSER using TikZJax, which does NOT support
-PGF math functions. Using them causes the renderer to hang silently.
+CRITICAL — TikZJax browser renderer restrictions (violations = silent hang or compile error):
 
-FORBIDDEN in coordinate values or expressions:
+FORBIDDEN — never use these in coordinates, lengths, or expressions:
   sqrt(), sin(), cos(), tan(), abs(), pow(), mod(), ln(), exp(),
   min(), max(), floor(), ceil(), round(), rnd(), pi, e
 
-INSTEAD — pre-compute all values to plain decimal numbers:
+PRE-COMPUTE all values to plain decimal numbers BEFORE writing the code:
   ✗ BAD:  \\coordinate (C) at (3, {sqrt(3)});
   ✓ GOOD: \\coordinate (C) at (3, 1.73205);
 
   ✗ BAD:  \\coordinate (P) at ({2*cos(60)}, {2*sin(60)});
-  ✓ GOOD: \\coordinate (P) at (1, 1.73205);
+  ✓ GOOD: \\coordinate (P) at (1.0, 1.73205);
 
   ✗ BAD:  \\draw (0,0) -- ({3*cos(30)},{3*sin(30)});
   ✓ GOOD: \\draw (0,0) -- (2.59808, 1.5);
 
-ALSO FORBIDDEN — calc library expressions with math functions:
   ✗ BAD:  \\coordinate (M) at ($(A)!{sqrt(2)/2}!(B)$);
   ✓ GOOD: \\coordinate (M) at ($(A)!0.70711!(B)$);
 
-Every coordinate value must be a plain number (integer or decimal). No braces
-around expressions, no function calls, no PGF math operators.
+  ✗ BAD:  \\draw (0,0) arc (0:{asin(0.5)*180/pi}:2);
+  ✓ GOOD: \\draw (0,0) arc (0:30:2);
+
+Common pre-computed values (use these directly):
+  sin(30°)=0.5, cos(30°)=0.86603, sin(45°)=0.70711, cos(45°)=0.70711
+  sin(60°)=0.86603, cos(60°)=0.5, sqrt(2)=1.41421, sqrt(3)=1.73205
+
+Every coordinate value must be a plain integer or decimal. No {} around computed
+expressions. No function calls. No PGF math operators inside coordinate values.
 `;
 
 // ─── Output format guardrails ────────────────────────────────────────────────

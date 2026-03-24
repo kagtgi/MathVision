@@ -217,13 +217,20 @@ export async function latexToImage(
 
   const bytes = await new Promise<Uint8Array>((resolve, reject) => {
     img.onload = () => {
-      const { canvas, ctx } = getReusableCanvas(width, height);
+      // Use a local canvas — latexToImage can be called concurrently (e.g.
+      // Promise.allSettled for all equations on a page).  A shared canvas
+      // would be resized by a concurrent call before toBlob fires, producing
+      // a corrupted or wrong-sized image.
+      const localCanvas = document.createElement('canvas');
+      localCanvas.width = width;
+      localCanvas.height = height;
+      const ctx = localCanvas.getContext('2d')!;
       ctx.fillStyle = '#ffffff';
       ctx.fillRect(0, 0, width, height);
       ctx.drawImage(img, 0, 0, width, height);
       URL.revokeObjectURL(svgUrl);
 
-      canvas.toBlob(
+      localCanvas.toBlob(
         (blob) => {
           if (!blob) {
             reject(new Error('Failed to create image blob'));
@@ -373,13 +380,19 @@ export function waitForTikzSvg(container: HTMLElement, timeoutMs: number): Promi
       const svg = container.querySelector('svg');
       if (svg) { settle(svg); return; }
 
-      // Early error detection: TikZJax may replace the script with an error
-      // message or remove it without producing an SVG. If the script element
-      // is gone and there's no SVG, compilation failed.
+      // TikZJax removes the <script> element BEFORE inserting the SVG (two
+      // separate DOM mutations).  If we call settle(null) the moment the
+      // script disappears we get a false-positive compile error on every
+      // successful render.  Instead, schedule a deferred check: if the SVG
+      // still hasn't appeared after 500 ms, only then declare failure.
       const script = container.querySelector('script[type="text/tikz"]');
       if (!script && !container.querySelector('svg')) {
-        console.warn('TikZJax removed script without producing SVG — compile error');
-        settle(null);
+        setTimeout(() => {
+          if (!settled && !container.querySelector('svg')) {
+            console.warn('TikZJax removed script without producing SVG — compile error');
+            settle(null);
+          }
+        }, 500);
       }
     });
 

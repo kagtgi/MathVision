@@ -9,7 +9,7 @@ import rehypeKatex from 'rehype-katex';
 import { motion } from 'framer-motion';
 import PdfToDocxConverter from './PdfToDocxConverter';
 import { generateTikzMultiAgent, extractTikzCode } from './utils/tikzMultiAgent';
-import { waitForTikzSvg, getReusableCanvas, preprocessTikzForTikzJax } from './utils/latexToImage';
+import { waitForTikzSvg, preprocessTikzForTikzJax } from './utils/latexToImage';
 import { GEMINI_MODEL, LATEX_MATH_RULES, ANTI_HALLUCINATION, OUTPUT_FORMAT_RULES, TIKZJAX_COMPAT_RULES } from './utils/sharedPrompts';
 
 type AppMode = 'image-to-latex' | 'pdf-to-docx';
@@ -796,18 +796,27 @@ function TikzRendererWithRef({ code, onImageReady }: { code: string, onImageRead
         const scale = 2;
         const w = img.width * scale;
         const h = img.height * scale;
-        const { canvas, ctx } = getReusableCanvas(w, h);
-        ctx.fillStyle = 'white';
-        ctx.fillRect(0, 0, w, h);
-        ctx.drawImage(img, 0, 0, w, h);
+        // Use a local canvas — multiple TikzRendererWithRef components can
+        // be active simultaneously (one per TikZ block in the result).
+        // A shared canvas would be corrupted by concurrent img.onload calls.
+        const localCanvas = document.createElement('canvas');
+        localCanvas.width = w;
+        localCanvas.height = h;
+        const localCtx = localCanvas.getContext('2d')!;
+        localCtx.fillStyle = 'white';
+        localCtx.fillRect(0, 0, w, h);
+        localCtx.drawImage(img, 0, 0, w, h);
         URL.revokeObjectURL(url);
-        const dataUrl = canvas.toDataURL('image/png');
+        // Remove the hidden render container now that the PNG is captured.
+        if (renderDiv.parentNode) document.body.removeChild(renderDiv);
+        const dataUrl = localCanvas.toDataURL('image/png');
         setPngDataUrl(dataUrl);
         setIsRendering(false);
         onImageReadyRef.current?.(dataUrl);
       };
       img.onerror = () => {
         URL.revokeObjectURL(url);
+        if (renderDiv.parentNode) document.body.removeChild(renderDiv);
         if (!cancelled) { setIsRendering(false); onImageReadyRef.current?.(null); }
       };
       img.src = url;

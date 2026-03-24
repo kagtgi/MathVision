@@ -1,9 +1,8 @@
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { GoogleGenAI } from '@google/genai';
 import { Upload, Image as ImageIcon, Loader2, Copy, CheckCircle2, AlertCircle, Key, ImageDown, Eye, Code, FileText, ArrowRightLeft } from 'lucide-react';
 import { useDropzone } from 'react-dropzone';
 import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import { motion } from 'framer-motion';
@@ -502,50 +501,118 @@ export default function App() {
   );
 }
 
-// Component to render the markdown result with custom code block styling
+// ─── Output parsing ──────────────────────────────────────────────────────────
+
+/** Extract all ```latex / ```tex fenced code blocks from the AI output. */
+function parseOutputBlocks(content: string): { tikzBlocks: string[]; latexBlocks: string[]; plainText: string } {
+  const tikzBlocks: string[] = [];
+  const latexBlocks: string[] = [];
+
+  const regex = /```(?:latex|tex)\s*\n([\s\S]*?)\n?```/g;
+  let match;
+  while ((match = regex.exec(content)) !== null) {
+    const code = match[1].trim();
+    if (!code) continue;
+    if (code.includes('\\begin{tikzpicture}')) {
+      tikzBlocks.push(code);
+    } else {
+      latexBlocks.push(code);
+    }
+  }
+
+  // Plain text = everything left after stripping code fences
+  const plainText = content.replace(/```(?:latex|tex)\s*\n[\s\S]*?\n?```/g, '').trim();
+
+  return { tikzBlocks, latexBlocks, plainText };
+}
+
+// ─── Top-level result display ─────────────────────────────────────────────────
+
+/**
+ * Renders AI output in a guaranteed layout:
+ *   1. TikZ Preview  (rendered figure)
+ *   2. TikZ Code     (copyable source)
+ *   3. LaTeX Preview (KaTeX rendered formulas)
+ *   4. LaTeX Code    (copyable source)
+ *   5. Plain text    (if no code blocks found — e.g. error message)
+ */
 function ResultRenderer({ content }: { content: string }) {
+  const { tikzBlocks, latexBlocks, plainText } = useMemo(
+    () => parseOutputBlocks(content),
+    [content],
+  );
+
+  const hasBlocks = tikzBlocks.length > 0 || latexBlocks.length > 0;
+
   return (
-    <div className="prose prose-slate prose-sm max-w-none">
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm, remarkMath]}
-        rehypePlugins={[rehypeKatex]}
-        components={{
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          code(props: any) {
-            const { className, children } = props;
-            const match = /language-(\w+)/.exec(className || '');
+    <div>
+      {/* 1+2 — TikZ Preview → TikZ Code */}
+      {tikzBlocks.map((code, i) => (
+        <TikzSection key={`tikz-${i}`} code={code} />
+      ))}
 
-            if (match) {
-              return (
-                <CodeBlock language={match[1]} code={String(children).replace(/\n$/, '')} />
-              );
-            }
+      {/* 3+4 — LaTeX Preview → LaTeX Code */}
+      {latexBlocks.map((code, i) => (
+        <LatexSection key={`latex-${i}`} code={code} />
+      ))}
 
-            return (
-              <code className="bg-[#00186E]/5 text-[#00186E] px-1.5 py-0.5 rounded-md font-mono text-xs">
-                {children}
-              </code>
-            );
-          }
-        }}
-      >
-        {content}
-      </ReactMarkdown>
+      {/* 5 — Plain text (error / unreadable message) */}
+      {!hasBlocks && plainText && (
+        <p className="p-4 text-sm text-[#00186E]/70 font-sans-brand">{plainText}</p>
+      )}
     </div>
   );
 }
 
 
-function FormulaPreview({ code }: { code: string }) {
+// ─── Section components ───────────────────────────────────────────────────────
+
+/** Renders TikZ: Preview → Code (guaranteed order) */
+function TikzSection({ code }: { code: string }) {
+  const [tikzImageUrl, setTikzImageUrl] = useState<string | null>(null);
+
   return (
-    <div className="bg-white p-4 rounded-lg text-[#00186E] overflow-auto prose prose-slate max-w-none border border-[#00186E]/10 min-h-[200px]">
-      <ReactMarkdown
-        remarkPlugins={[remarkMath]}
-        rehypePlugins={[rehypeKatex]}
+    <>
+      <PreviewBlock
+        title="TikZ Preview"
+        icon={<Eye className="w-3.5 h-3.5 mr-1" />}
+        actions={
+          tikzImageUrl ? (
+            <div className="flex items-center gap-3">
+              <DownloadImageButton imageDataUrl={tikzImageUrl} />
+              <CopyImageButton imageDataUrl={tikzImageUrl} />
+            </div>
+          ) : undefined
+        }
       >
-        {code}
-      </ReactMarkdown>
-    </div>
+        <TikzRendererWithRef code={code} onImageReady={setTikzImageUrl} />
+      </PreviewBlock>
+
+      <CodeBlockPanel label="TikZ Code" code={code} />
+    </>
+  );
+}
+
+/** Renders LaTeX formulas: Preview → Code (guaranteed order) */
+function LatexSection({ code }: { code: string }) {
+  return (
+    <>
+      <PreviewBlock
+        title="LaTeX Preview"
+        icon={<Eye className="w-3.5 h-3.5 mr-1" />}
+      >
+        <div className="text-[#00186E] overflow-auto prose prose-slate max-w-none">
+          <ReactMarkdown
+            remarkPlugins={[remarkMath]}
+            rehypePlugins={[rehypeKatex]}
+          >
+            {code}
+          </ReactMarkdown>
+        </div>
+      </PreviewBlock>
+
+      <CodeBlockPanel label="LaTeX Code" code={code} />
+    </>
   );
 }
 
@@ -694,50 +761,6 @@ function CodeBlockPanel({ label, code }: { label: string, code: string }) {
   );
 }
 
-function CodeBlock({ language, code }: { language: string, code: string }) {
-  const [tikzImageUrl, setTikzImageUrl] = useState<string | null>(null);
-  const isTikz = code.includes('\\begin{tikzpicture}');
-
-  if (isTikz) {
-    return (
-      <>
-        {/* TikZ Preview Block */}
-        <PreviewBlock
-          title="TikZ Preview"
-          icon={<Eye className="w-3.5 h-3.5 mr-1" />}
-          actions={
-            tikzImageUrl ? (
-              <div className="flex items-center gap-3">
-                <DownloadImageButton imageDataUrl={tikzImageUrl} />
-                <CopyImageButton imageDataUrl={tikzImageUrl} />
-              </div>
-            ) : undefined
-          }
-        >
-          <TikzRendererWithRef code={code} onImageReady={setTikzImageUrl} />
-        </PreviewBlock>
-
-        {/* TikZ Code Block */}
-        <CodeBlockPanel label="TikZ Code" code={code} />
-      </>
-    );
-  }
-
-  return (
-    <>
-      {/* Math Preview Block */}
-      <PreviewBlock
-        title="Math Preview"
-        icon={<Eye className="w-3.5 h-3.5 mr-1" />}
-      >
-        <FormulaPreview code={code} />
-      </PreviewBlock>
-
-      {/* Math Code Block */}
-      <CodeBlockPanel label="LaTeX Code" code={code} />
-    </>
-  );
-}
 
 const TIKZ_DOM_TIMEOUT_MS = 30_000; // Match TIKZ_RENDER_TIMEOUT_MS; complex figures need full 30s
 

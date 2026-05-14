@@ -34,72 +34,145 @@ export interface TikzProgressCallback {
 
 // ─── Prompts ─────────────────────────────────────────────────────────────────
 
-const DRAFT_B_PROMPT = `You are a TikZ expert. Look at this image of a geometric figure carefully.
+const DRAFT_B_PROMPT = `You are an expert TikZ code generator. Analyze this geometric figure image and produce complete, compilable TikZ code that faithfully reproduces it.
 
-Write COMPLETE, COMPILABLE TikZ code that faithfully reproduces the figure.
+BEFORE WRITING CODE — observe carefully:
+• Identify every labeled point and estimate its coordinates to fit within [0,6]×[0,6].
+• Note which edges are solid (principal) vs dashed (altitude/auxiliary/construction).
+• Note every angle arc, right-angle mark, equal-segment tick, or parallel mark.
+• Note any circles, coordinate axes, or other special elements.
 
-TEMPLATE — follow this structure:
+REQUIRED TEMPLATE — follow this structure exactly:
 % Required: \\usepackage{tikz}
-% \\usetikzlibrary{angles, quotes, calc, arrows.meta, decorations.markings}
+% \\usetikzlibrary{angles, quotes, calc, decorations.markings, arrows.meta}
 
 \\begin{tikzpicture}[scale=1]
-  \\coordinate (A) at (x, y);
+  % ── 1. ALL coordinates defined here, before any draw command ─────────────
+  \\coordinate (A) at (0, 0);
+  \\coordinate (B) at (5, 0);
+  \\coordinate (C) at (2.5, 4.33);  % pre-computed decimal, never sqrt()
+  \\coordinate (H) at (2.5, 0);
+
+  % ── 2. Edges ─────────────────────────────────────────────────────────────
   \\draw[thick] (A) -- (B) -- (C) -- cycle;
-  \\pic[draw, angle radius=8pt] {angle = C--B--A};
-  \\pic[draw] {right angle = A--H--B};
-  \\draw[decoration={markings, mark=at position 0.5 with {\\draw (0,-2pt) -- (0,2pt);}}, postaction={decorate}] (A) -- (B);
-  \\fill (A) circle (1.5pt); \\node[below left] at (A) {$A$};
+  \\draw[dashed] (C) -- (H);
+
+  % ── 3. Marks ─────────────────────────────────────────────────────────────
+  % Right-angle mark (library: angles) — vertex is the MIDDLE argument:
+  \\pic[draw, angle radius=5pt]{right angle = A--H--C};
+
+  % Labeled angle arc (libraries: angles + quotes) — vertex is MIDDLE:
+  \\pic["$60{}^\\circ$", draw, angle radius=10mm, angle eccentricity=1.5]{angle = C--A--B};
+
+  % Single equal-segment tick (library: decorations.markings):
+  \\draw[decoration={markings, mark=at position 0.5 with {\\draw (-0pt,-2.5pt)--(-0pt,2.5pt);}},
+        postaction={decorate}] (A) -- (B);
+
+  % Double tick for double-equal sides:
+  \\draw[decoration={markings,
+    mark=at position 0.5 with {\\draw (-1.5pt,-2.5pt)--(-1.5pt,2.5pt); \\draw (1.5pt,-2.5pt)--(1.5pt,2.5pt);}},
+        postaction={decorate}] (B) -- (C);
+
+  % Circle with center O (use pre-computed decimal radius):
+  % \\draw[thick] (O) circle (2.5);
+
+  % ── 4. Point dots and labels ─────────────────────────────────────────────
+  \\fill (A) circle (1.5pt); \\node[below left]  at (A) {$A$};
+  \\fill (B) circle (1.5pt); \\node[below right] at (B) {$B$};
+  \\fill (C) circle (1.5pt); \\node[above]       at (C) {$C$};
+  \\fill (H) circle (1.5pt); \\node[below]       at (H) {$H$};
 \\end{tikzpicture}
 
-RULES:
-1. Define \\coordinate for EVERY named point BEFORE using it.
-2. \\fill + \\node for every labeled point. All math in $...$
-3. [thick] for main edges, [dashed] for construction lines.
-4. angles library for arcs, right angle for 90° marks, decorations.markings for tick marks.
-5. Coordinates in [0,6]×[0,6]. Match the image proportions.
-6. Only libraries you use. Must compile with pdflatex.
-7. Include EVERY visible element. Do NOT add anything not in the image.
+MANDATORY RULES:
+1. ALL \\coordinate declarations MUST appear before ANY \\draw or \\fill that references them.
+2. Every visible labeled point: \\fill (X) circle (1.5pt); AND \\node[anchor] at (X) {$X$};
+3. ALL math in node text uses $...$  — including single letters {$A$}, degrees {$60{}^\\circ$}.
+4. [thick] for principal edges; [dashed] for altitudes, medians, auxiliary/construction lines.
+5. Right-angle mark: \\pic[draw, angle radius=5pt]{right angle = P--VERTEX--Q};  (vertex in MIDDLE)
+6. Angle arc: \\pic["LABEL", draw, angle radius=Xmm, angle eccentricity=Y]{angle = C--VERTEX--A};  (vertex in MIDDLE)
+7. ALL coordinate values must be plain decimals — never sqrt(), sin(), cos(), or any function call.
+8. Fit all coordinates within [0,6]×[0,6].
+9. Declare ONLY the libraries you actually use.
+10. Include EVERY element visible in the image. Add NOTHING not visible.
 ${TIKZJAX_COMPAT_RULES}
-Output ONLY the TikZ code. No explanation, no markdown fences.`;
+Output ONLY the TikZ code starting with % Required. No markdown fences. No explanation.`;
 
-const VERIFY_FIX_PROMPT = `You are a TikZ quality verifier. You receive:
-1. The original image of a geometric figure
-2. Two candidate TikZ code drafts
+const VERIFY_FIX_PROMPT = `You are a TikZ code quality verifier. You have the original image plus two candidate TikZ drafts. Systematically verify both, then produce the best possible final code.
 
-PART 1 — VERIFY (step by step):
-a) Compare each draft against the original image element by element.
-b) Check each draft for compilation errors:
-   - Any \\coordinate used before being defined?
-   - Any undefined macros or missing libraries?
-   - Syntax errors (unmatched braces, missing semicolons)?
-c) Compare proportions: which draft better matches the image layout?
+## VERIFICATION CHECKLIST
 
-PART 2 — OUTPUT:
-Produce the FINAL TikZ code. You may:
-- Pick the better draft as-is if correct
-- Merge best parts from both
-- Fix any errors found
+For EACH draft, check every item:
 
-Your response MUST have exactly this format:
+### Completeness (vs. the image)
+□ Every labeled point has \\fill (X) circle (1.5pt) + \\node
+□ Every line segment and edge is drawn
+□ Every angle arc is present (correct vertex, correct label if shown)
+□ Every right-angle mark is present (at the correct corner)
+□ Every equal-segment tick is present (on the correct sides)
+□ Every parallel mark / arrow is present if shown
+□ Circles and arcs are present if shown
+□ Coordinate axes are present if shown
+□ All text labels and measurements are included
+
+### Accuracy (vs. the image)
+□ Coordinate proportions match the image layout
+□ Angle arcs are at the correct vertices (vertex is MIDDLE in {angle = C--B--A})
+□ Right-angle marks are at the correct corners
+□ Tick marks are on the correct segments
+□ Dashed lines are only used for auxiliary/construction lines
+
+### Compilation correctness
+□ ALL \\coordinate declarations appear before their first use
+□ All libraries used are declared in \\usetikzlibrary{...}
+□ All braces and brackets are balanced
+□ All \\draw statements end with semicolons
+□ All \\pic commands have correct syntax (vertex in MIDDLE position)
+□ All coordinate values are plain decimals — no sqrt(), sin(), cos(), or any function
+
+### Anti-hallucination
+□ No elements added that are NOT visible in the image
+□ No labels invented that are NOT shown in the image
+
+## MERGE STRATEGY
+
+Priority order:
+1. If one draft is complete and correct → use it, fix any compile errors only
+2. If both are partially correct → take the better coordinate layout; add missing elements from the other
+3. If both miss visible elements → add those missing elements to the better base draft
+4. If either draft adds elements NOT in the image → remove them from the final output
+
+## REQUIRED OUTPUT FORMAT
+
+Your response must contain EXACTLY these two sections in this order:
 
 REASONING:
-(your step-by-step analysis — be specific, reference exact lines)
+(Step-by-step analysis. For each issue found, state: which draft, what is wrong, how you fixed it.
+Reference specific coordinates, element names, or line content — be concrete.)
 
 FINAL_CODE:
 % Required: \\usepackage{tikz}
 % \\usetikzlibrary{...}
 
 \\begin{tikzpicture}[scale=1]
-...
+  % ── Coordinates ──────────────────────────────────────────────────────
+  \\coordinate (A) at (x, y);
+  ...
+
+  % ── Drawing commands ─────────────────────────────────────────────────
+  \\draw[thick] ...;
+  ...
+
+  % ── Labels ───────────────────────────────────────────────────────────
+  \\fill (A) circle (1.5pt); \\node[anchor] at (A) {$A$};
+  ...
 \\end{tikzpicture}
 
-Rules:
-- FINAL_CODE must be complete and compile with pdflatex.
-- Every element visible in the image must be present.
-- Do not add elements not in the image.
-- Do not hallucinate labels, points, or decorations not in the image.
-- If both drafts miss a visible element, add it.
-- If both drafts include something NOT in the image, remove it.
+Rules for FINAL_CODE:
+- Must begin with % Required: \\usepackage{tikz}
+- Must end with \\end{tikzpicture}
+- Must compile cleanly with pdflatex
+- Every \\coordinate must be defined before its first use
+- Every coordinate value must be a plain decimal number
 ${TIKZJAX_COMPAT_RULES}`;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────

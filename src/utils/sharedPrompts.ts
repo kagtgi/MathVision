@@ -12,72 +12,81 @@ export const GEMINI_MODEL = 'gemini-pro-latest';
 // Used by both Image→LaTeX (SYSTEM_INSTRUCTION) and PDF→DOCX (PDF_ANALYSIS_PROMPT)
 
 export const LATEX_MATH_RULES = `
-### Geometry naming (Vietnamese + international conventions)
+### Geometry notation (Vietnamese + international)
 
-**Points**: $A$, $B$, $M$, $O$, $H$ — capital italic, no decoration.
+**Points**: $A$, $B$, $M$, $O$, $H$ — capital italic letter, no decoration.
 
-**Segments/lines/rays**:
-- Segment: $AB$ (no bar, no arrow)
-- Length: $AB$ or $|AB|$
-- Line: $\\overleftrightarrow{AB}$
-- Ray/vector: $\\overrightarrow{AB}$
+**Segments / lengths / lines / rays / vectors**:
+- Segment AB (no bar, no arrow): $AB$
+- Length of segment: $AB$ or $|AB|$
+- Line through A and B: $\\overleftrightarrow{AB}$
+- Ray from A through B: $\\overrightarrow{AB}$
+- Vector from A to B: $\\overrightarrow{AB}$
 
 **Angles**:
-- Angle at vertex B: $\\widehat{ABC}$ (Vietnamese default) or $\\angle ABC$
-- Use whichever notation the image shows; default $\\widehat{ABC}$
-- Degree values: $60{}^\\circ$ — always use {}^\\circ, never bare ° or ^\\circ
+- Angle at vertex B in ∠ABC: $\\widehat{ABC}$ (Vietnamese default) or $\\angle ABC$
+- Use whichever notation the image shows; default to $\\widehat{ABC}$
+- Degree value: $60{}^\\circ$ — ALWAYS use {}^\\circ, NEVER bare ° or ^\\circ without braces
 
-**Shapes**:
+**Shapes and geometric relations**:
 - Triangle: $\\triangle ABC$
-- Congruent: $\\triangle ABC \\cong \\triangle DEF$
-- Similar: $\\triangle ABC \\sim \\triangle DEF$
-- Circle center O: $(O)$ or $(O; R)$
-- Arc: $\\overset{\\frown}{AB}$
-
-**Relations**:
+- Congruent triangles: $\\triangle ABC \\cong \\triangle DEF$
+- Similar triangles: $\\triangle ABC \\sim \\triangle DEF$
+- Circle with center O: $(O)$ or $(O; R)$
+- Arc AB: $\\overset{\\frown}{AB}$
 - Perpendicular: $AB \\perp CD$
 - Parallel: $AB \\parallel CD$
-- Area: $S_{\\triangle ABC}$
+- Area of triangle: $S_{\\triangle ABC}$
 
-### Number and expression rules
+### Arithmetic and algebra
 
-- Fractions: $\\frac{a}{b}$ — always \\frac, never a/b
-- Roots: $\\sqrt{x}$, $\\sqrt[3]{8}$
-- Decimals (Vietnamese): $3{,}14$ — comma in braces
+- Fractions: $\\frac{a}{b}$ — ALWAYS \\frac, NEVER write a/b inline
+- Square root: $\\sqrt{x}$
+- nth root: $\\sqrt[n]{x}$ — e.g. $\\sqrt[3]{8}$
+- Absolute value: $\\left| x \\right|$ — use \\left and \\right
 - Percentage: $75\\%$
-- Absolute value: $\\left| x \\right|$
-- Scientific: $2 \\times 10^{5}$
+- Scientific notation: $2 \\times 10^{5}$
+- Vietnamese decimal comma: $3{,}14$ — comma enclosed in braces
 
-### Bracket rules — ALWAYS use \\left and \\right
+### Delimiters — ALWAYS use \\left and \\right for non-trivial content
 
-- Parentheses: $\\left( ... \\right)$
-- Square: $\\left[ ... \\right]$
-- Curly: $\\left\\{ ... \\right\\}$
+- Parentheses: $\\left( \\cdots \\right)$
+- Square brackets: $\\left[ \\cdots \\right]$
+- Curly braces: $\\left\\{ \\cdots \\right\\}$
 
-### Derivative and degree notation
+### Calculus and advanced notation
 
-- Derivatives: $\\{f\\}'(x)$, $\\{y\\}''$ — wrap base in braces before prime
-- Degrees: $30{}^\\circ$ — braces before ^\\circ
+- Derivatives: $\\{f\\}'(x)$, $\\{y\\}''$ — wrap the base in braces before every prime
+- Definite integral: $\\int_{a}^{b} f(x)\\,dx$
+- Summation: $\\sum_{i=1}^{n} a_i$
+- Limit: $\\lim_{x \\to \\infty} f(x)$
+- Infinity: $\\infty$
 
-### Standard commands
-\\frac{a}{b}, \\int_{a}^{b} f(x)\\,dx, \\sum_{i=1}^{n}, \\lim_{x \\to \\infty}, \\sqrt{}, \\sqrt[n]{}, \\vec{v}, \\overrightarrow{AB}, \\alpha \\beta \\gamma \\theta \\pi \\Delta \\Sigma
+### Standard command reference
+$\\frac{a}{b}$, $\\int_{a}^{b} f(x)\\,dx$, $\\sum_{i=1}^{n}$, $\\lim_{x \\to \\infty}$,
+$\\sqrt{x}$, $\\sqrt[n]{x}$, $\\vec{v}$, $\\overrightarrow{AB}$, $\\widehat{ABC}$,
+$\\alpha$, $\\beta$, $\\gamma$, $\\delta$, $\\theta$, $\\pi$, $\\varphi$, $\\omega$,
+$\\Delta$, $\\Sigma$, $\\Pi$, $\\Omega$
 
 ### Systems and matrices
-- Systems: $\\begin{cases} ... \\end{cases}$
-- Matrices: $\\begin{pmatrix} a & b \\\\ c & d \\end{pmatrix}$
+
+- System of equations: $\\begin{cases} f_1 \\\\ f_2 \\end{cases}$
+- Matrix (parentheses): $\\begin{pmatrix} a & b \\\\ c & d \\end{pmatrix}$
+- Matrix (brackets): $\\begin{bmatrix} a & b \\\\ c & d \\end{bmatrix}$
 `;
 
 // ─── Anti-hallucination rules ────────────────────────────────────────────────
 
 export const ANTI_HALLUCINATION = `
-CRITICAL — accuracy rules you MUST follow:
-1. Reproduce EXACTLY what is shown — never simplify, solve, or alter the math.
-2. Never add symbols, labels, or decorations that are not visible in the image.
-3. Never guess missing information — if something is unclear, omit it rather than guess.
-4. If text is in Vietnamese, preserve it exactly as shown (UTF-8).
-5. Only output what you can confidently read from the image.
-6. Do NOT infer hidden values — if a number or symbol is partially obscured, mark it with \\text{[unclear]} rather than guessing.
-7. Do NOT "improve" or "correct" what appears to be a mistake in the original — reproduce it as-is.
+CRITICAL ACCURACY RULES — violating any of these is a hard failure:
+
+1. Reproduce EXACTLY what is shown — never simplify, rearrange, solve, or "improve" the math.
+2. Never add symbols, labels, decorations, or elements that are not visible in the image.
+3. Never guess obscured information — if a number or symbol is partially hidden, write \\text{[unclear]} rather than guessing.
+4. If text is in Vietnamese, preserve it EXACTLY as shown, including every diacritical mark.
+5. Only output what you can confidently read — when uncertain, \\text{[unclear]} is always safer than a guess.
+6. Never "correct" what appears to be a mistake in the original — reproduce errors as-is.
+7. Never infer context from surrounding content — treat each element independently.
 `;
 
 // ─── TikZJax compatibility rules ─────────────────────────────────────────────

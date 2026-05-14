@@ -88,36 +88,82 @@ interface PageContent {
 
 // ─── Gemini Prompt ───────────────────────────────────────────────────────────
 
-const PDF_ANALYSIS_PROMPT = `You are a high-quality PDF document analyzer specializing in image-to-LaTeX conversion. Analyze this PDF page image and extract ALL content in reading order with maximum fidelity.
+const PDF_ANALYSIS_PROMPT = `You are an expert PDF document analyzer specializing in mathematical content extraction with maximum fidelity. Analyze this PDF page image and extract ALL content in reading order.
 
-Return ONLY a valid JSON object (no markdown code blocks, no explanations, no extra text). The response must start with { and end with }.
+Return ONLY a valid JSON object. Your response must start with { and end with }. No markdown, no code blocks, no explanation whatsoever.
 
-JSON structure:
+## OUTPUT SCHEMA
+
 {
   "elements": [
     {"type": "heading", "level": 1, "content": "Section Title"},
-    {"type": "paragraph", "content": "Regular text. Use $x^2$ for inline math."},
+    {"type": "paragraph", "content": "Text with $inline math$ here."},
     {"type": "equation", "latex": "E = mc^2"},
-    {"type": "table", "rows": [["Header 1", "Header 2"], ["$\\\\frac{a}{b}$", "text value"]]},
-    {"type": "image", "bbox": [10, 20, 30, 25], "caption": "Figure 1: Description"}
+    {"type": "table", "rows": [["Header 1", "Header 2"], ["$\\\\frac{a}{b}$", "value"]]},
+    {"type": "image", "bbox": [5.0, 35.0, 45.0, 30.0], "caption": "Figure 1: Triangle ABC"}
   ]
 }
 
-Rules:
-1. Extract ALL content top-to-bottom, left-to-right in reading order
-2. "heading": for titles, section headers, chapter titles. Use level 1, 2, or 3
-3. "paragraph": for text blocks. Wrap inline math with $...$ delimiters. Treat every mathematical expression as an image-to-LaTeX task — reproduce the exact notation, symbols, spacing, and structure visible in the image
-4. "equation": for standalone/display equations on their own line. Put LaTeX WITHOUT $ delimiters in the "latex" field. Convert with image-to-LaTeX quality: capture every symbol, subscript, superscript, fraction, operator, and decoration exactly as shown
-5. "table": for tables. Each cell is a string. Use $...$ for LaTeX math or plain text in cells. Include header row as first row
-6. "image": for figures, diagrams, geometric drawings, charts, and graphs:
-   - bbox = [x%, y%, width%, height%] as percentage of page dimensions — be VERY precise with bounding box coordinates
-   - Include caption if visible
-   - Do NOT include a "tikz" field — TikZ code will be generated separately by a specialized pipeline
-7. Preserve ALL text EXACTLY as shown (including non-English characters)
-8. Convert ALL mathematical expressions to proper LaTeX notation with maximum accuracy:
+## RULES FOR EACH ELEMENT TYPE
+
+### "heading"
+For: section titles, chapter headers, problem group headers, numbered section headings.
+- level: 1 = main title/chapter, 2 = section, 3 = subsection
+- content: heading text; wrap any math inside $...$
+- Example: {"type": "heading", "level": 2, "content": "Phần 2: Hàm số $y = f(x)$"}
+
+### "paragraph"
+For: regular text, problem statements, instructions, numbered items, bullet points.
+- content: full text with ALL math wrapped in $...$; even a single variable must be $x$
+- Preserve Vietnamese text EXACTLY, including every diacritical and tone mark
+- Include numbering if present: "1. Tìm $x$ sao cho $2x + 1 = 0$."
+- Example: {"type": "paragraph", "content": "Cho tam giác $ABC$ vuông tại $A$, có $AB = 3$ và $AC = 4$."}
+
+### "equation"
+For: standalone display equations on their own line (centered, numbered, or unnumbered).
+- latex: complete LaTeX WITHOUT $ delimiters
+- Reproduce EVERY symbol, subscript, superscript, fraction, operator, and accent exactly as shown
+- Example: {"type": "equation", "latex": "x_{1,2} = \\\\frac{-b \\\\pm \\\\sqrt{b^2 - 4ac}}{2a}"}
+
+### "table"
+For: any tabular grid of data with rows and columns.
+- rows: array of row arrays; the first row is the header
+- Each cell is a string; use $...$ for math within cells
+- Example: {"type": "table", "rows": [["$n$", "$a_n$", "$S_n$"], ["$1$", "$2$", "$2$"], ["$2$", "$4$", "$6$"]]}
+
+### "image"
+For: geometric drawings, diagrams, graphs, charts, coordinate figures, any non-text visual.
+- bbox: [x%, y%, width%, height%] as percentages of the FULL PAGE dimensions
+    x%      = left edge of figure ÷ page width × 100
+    y%      = top edge of figure ÷ page height × 100
+    width%  = figure width ÷ page width × 100
+    height% = figure height ÷ page height × 100
+  Be precise — these coordinates are used to crop the image for TikZ generation.
+- caption: include the visible figure caption if present; omit the field entirely if none
+- Do NOT include a "tikz" field — TikZ generation is handled by a separate pipeline
+- Example: {"type": "image", "bbox": [5.0, 42.0, 48.0, 35.0], "caption": "Hình 2: Tam giác ABC"}
+
+## EXTRACTION GUIDELINES
+
+Reading order:
+- Extract elements top-to-bottom, left-to-right following natural reading flow.
+- For two-column layouts: process the entire left column first, then the right column.
+- Keep numbered items in their original sequence.
+
+Math conversion — apply image-to-LaTeX quality (reproduce exactly):
 ${LATEX_MATH_RULES}
-9. For numbered lists or bullet points, include the number/bullet in the paragraph content
-10. Return ONLY the JSON object — no markdown formatting, no code blocks, no explanation
+
+Completeness — extract ALL of the following:
+- Every heading, even minor ones
+- Every paragraph, including short ones
+- Every standalone equation, including numbered ones
+- Every table, including small or partial ones
+- Every figure, diagram, or graph — even those without a caption
+
+Do NOT merge:
+- Do not combine separate paragraphs into one element
+- Do not merge a heading with the paragraph that follows it
+- Do not omit elements because they appear repetitive
 
 ${ANTI_HALLUCINATION}
 ${OUTPUT_FORMAT_RULES}`;

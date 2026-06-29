@@ -41,7 +41,6 @@ import { sanitizeLatexExpr } from './utils/latexSanitizer';
 import { tikzToImage } from './utils/latexToImage';
 import { generateTikzMultiAgent, generateTikzSingleAgent } from './utils/tikzMultiAgent';
 import { GEMINI_MODEL, TEMP_PRECISE, LATEX_MATH_RULES, ANTI_HALLUCINATION, OUTPUT_FORMAT_RULES } from './utils/sharedPrompts';
-
 // ─── Constants ──────────────────────────────────────────────────────────────
 
 const MAX_PDF_SIZE_BYTES = 50 * 1024 * 1024; // 50 MB
@@ -54,7 +53,11 @@ const API_TIMEOUT_MS = 120_000; // 120 seconds per page (pro model is slower)
 
 // ─── PDF.js Worker Setup ─────────────────────────────────────────────────────
 
-pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.js`;
+// Production (Electron): worker is copied to dist/ by vite.config.ts copyPdfjsWorker plugin.
+// Dev: load from CDN (developer has internet; no Electron CDN restrictions in dev).
+pdfjsLib.GlobalWorkerOptions.workerSrc = import.meta.env.PROD
+  ? './pdf.worker.min.mjs'
+  : `https://cdn.jsdelivr.net/npm/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 

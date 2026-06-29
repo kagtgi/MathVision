@@ -54,7 +54,7 @@ const API_TIMEOUT_MS = 120_000; // 120 seconds per page (pro model is slower)
 
 // ─── PDF.js Worker Setup ─────────────────────────────────────────────────────
 
-pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
+pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.js`;
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 

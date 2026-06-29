@@ -1,19 +1,52 @@
 @import "tailwindcss";
 
 @theme {
-  --font-serif-brand: "Garamond Premier Pro", "EB Garamond", "Cormorant Garamond", Garamond, "Times New Roman", serif;
-  --font-sans-brand: "Halyard Display", "Inter", "Helvetica Neue", Arial, sans-serif;
+  --font-serif-brand: "EB Garamond", "Garamond Premier Pro", "Cormorant Garamond", Garamond, "Times New Roman", serif;
+  --font-sans-brand: "Segoe UI", "Inter", "Helvetica Neue", Arial, sans-serif;
   --color-resolution-blue: #00186E;
   --color-my-sin: #FFAD1D;
   --color-wild-willow: #B9CF7C;
 }
 
 @layer base {
+  html, body {
+    height: 100%;
+    overflow: hidden;
+  }
+
+  #root {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+  }
+
   body {
-    font-family: var(--font-serif-brand);
+    font-family: var(--font-sans-brand);
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    background: #0c1017;
+    color: #c8d3e8;
   }
+
+  /* Scrollbar: workspace (dark) panels */
+  .scrollbar-dark {
+    scrollbar-width: thin;
+    scrollbar-color: #1f2e45 transparent;
+  }
+  .scrollbar-dark::-webkit-scrollbar { width: 5px; }
+  .scrollbar-dark::-webkit-scrollbar-track { background: transparent; }
+  .scrollbar-dark::-webkit-scrollbar-thumb { background: #1f2e45; border-radius: 99px; }
+  .scrollbar-dark::-webkit-scrollbar-thumb:hover { background: #2a3f60; }
+
+  /* Scrollbar: output (light) pane */
+  .scrollbar-light {
+    scrollbar-width: thin;
+    scrollbar-color: #d1cfc9 transparent;
+  }
+  .scrollbar-light::-webkit-scrollbar { width: 5px; }
+  .scrollbar-light::-webkit-scrollbar-track { background: transparent; }
+  .scrollbar-light::-webkit-scrollbar-thumb { background: #d1cfc9; border-radius: 99px; }
+  .scrollbar-light::-webkit-scrollbar-thumb:hover { background: #b8b5af; }
 }
 
 .font-serif-brand {
@@ -22,4 +55,49 @@
 
 .font-sans-brand {
   font-family: var(--font-sans-brand);
+}
+
+/* Graph-paper texture for upload zones */
+.graph-bg {
+  background-image:
+    linear-gradient(rgba(31, 46, 69, 0.45) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(31, 46, 69, 0.45) 1px, transparent 1px);
+  background-size: 28px 28px;
+  background-color: #101623;
+}
+
+/* Subtle inner glow on the gold CTA button */
+.btn-gold {
+  background: #FFAD1D;
+  box-shadow: 0 0 22px rgba(255, 173, 29, 0.18), 0 2px 6px rgba(0,0,0,0.3);
+  transition: background 0.15s, box-shadow 0.15s;
+}
+.btn-gold:hover:not(:disabled) {
+  background: #e89c10;
+  box-shadow: 0 0 30px rgba(255, 173, 29, 0.28), 0 3px 8px rgba(0,0,0,0.35);
+}
+.btn-gold:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+/* Code block syntax feel */
+.code-surface {
+  background: #101622;
+  border: 1px solid #1f2e45;
+}
+
+/* KaTeX output in output pane */
+.katex-output .katex { font-size: 1.1em; }
+
+/* Progress bar shimmer */
+@keyframes shimmer {
+  0%   { background-position: -400px 0; }
+  100% { background-position: 400px 0; }
+}
+.progress-shimmer {
+  background: linear-gradient(90deg, #FFAD1D 0%, #ffd16a 50%, #FFAD1D 100%);
+  background-size: 400px 100%;
+  animation: shimmer 1.6s infinite linear;
 }

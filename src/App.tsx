@@ -1,15 +1,17 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { GoogleGenAI } from '@google/genai';
-import { Upload, Image as ImageIcon, Loader2, Copy, CheckCircle2, AlertCircle, Key, ImageDown, Eye, Code, FileText, ArrowRightLeft } from 'lucide-react';
+import { Upload, Image as ImageIcon, Loader2, Copy, CheckCircle2, AlertCircle, Key, ImageDown, Eye, Code, FileText, ArrowRightLeft, Download } from 'lucide-react';
 import { useDropzone } from 'react-dropzone';
 import ReactMarkdown from 'react-markdown';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import { motion } from 'framer-motion';
+import { Document as DocxDocument, Packer, Paragraph, TextRun, Math as OfficeMath, ImageRun, AlignmentType } from 'docx';
 import PdfToDocxConverter from './PdfToDocxConverter';
-import { waitForTikzSvg, preprocessTikzForTikzJax } from './utils/latexToImage';
+import { waitForTikzSvg, preprocessTikzForTikzJax, tikzToImage } from './utils/latexToImage';
 import { GEMINI_MODEL, TEMP_STANDARD, LATEX_MATH_RULES, ANTI_HALLUCINATION, OUTPUT_FORMAT_RULES, TIKZJAX_COMPAT_RULES } from './utils/sharedPrompts';
-import { sanitizeLatexBlock, warnMismatchedDollars } from './utils/latexSanitizer';
+import { sanitizeLatexBlock, warnMismatchedDollars, sanitizeLatexExpr } from './utils/latexSanitizer';
+import { latexToMathChildren } from './utils/latexToDocxMath';
 
 type AppMode = 'image-to-latex' | 'pdf-to-docx';
 
@@ -120,6 +122,7 @@ export default function App() {
   const [processingStatus, setProcessingStatus] = useState('');
   const [result, setResult] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [isDownloadingDocx, setIsDownloadingDocx] = useState(false);
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
     const file = acceptedFiles[0];
@@ -242,6 +245,95 @@ export default function App() {
     } finally {
       setIsProcessing(false);
       setProcessingStatus('');
+    }
+  };
+
+  const downloadAsDocx = async () => {
+    if (!result) return;
+    setIsDownloadingDocx(true);
+    try {
+      const { tikzBlocks, latexBlocks } = parseOutputBlocks(result);
+      const docChildren: Paragraph[] = [];
+
+      // TikZ blocks → compile to PNG and embed
+      for (const tikzCode of tikzBlocks) {
+        try {
+          const tikzResult = await tikzToImage(tikzCode);
+          if (tikzResult) {
+            const maxW = 400;
+            const scale = tikzResult.width > maxW ? maxW / tikzResult.width : 1;
+            docChildren.push(
+              new Paragraph({
+                children: [
+                  new ImageRun({
+                    data: tikzResult.bytes,
+                    transformation: {
+                      width: Math.round(tikzResult.width * scale),
+                      height: Math.round(tikzResult.height * scale),
+                    },
+                    type: 'png',
+                  }),
+                ],
+                alignment: AlignmentType.CENTER,
+                spacing: { before: 160, after: 160 },
+              }),
+            );
+          }
+        } catch { /* skip failed TikZ */ }
+      }
+
+      // LaTeX blocks → line by line, math expressions → OMML
+      for (const latexCode of latexBlocks) {
+        for (const line of latexCode.split('\n')) {
+          const trimmed = line.trim();
+          if (!trimmed) continue;
+
+          const mathMatch = trimmed.match(/^\$(.+)\$$/);
+          if (mathMatch) {
+            try {
+              const mathChildren = latexToMathChildren(sanitizeLatexExpr(mathMatch[1]));
+              docChildren.push(
+                new Paragraph({
+                  children: [new OfficeMath({ children: mathChildren })],
+                  alignment: AlignmentType.CENTER,
+                  spacing: { before: 120, after: 120 },
+                }),
+              );
+            } catch {
+              docChildren.push(
+                new Paragraph({
+                  children: [new TextRun({ text: trimmed, italics: true })],
+                  spacing: { after: 60 },
+                }),
+              );
+            }
+          } else {
+            docChildren.push(
+              new Paragraph({
+                children: [new TextRun({ text: trimmed })],
+                spacing: { after: 60 },
+              }),
+            );
+          }
+        }
+      }
+
+      if (docChildren.length === 0) return;
+
+      const doc = new DocxDocument({ sections: [{ children: docChildren }] });
+      const blob = await Packer.toBlob(doc);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'mathvision-output.docx';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('DOCX download failed:', err);
+    } finally {
+      setIsDownloadingDocx(false);
     }
   };
 
@@ -466,12 +558,24 @@ export default function App() {
             <div className="shrink-0 px-4 py-2.5 border-b border-black/6 bg-white/50 flex items-center justify-between">
               <span className="text-[10px] font-semibold text-black/25 uppercase tracking-widest font-sans-brand">Output</span>
               {result && !isProcessing && (
-                <button
-                  onClick={() => { setResult(null); setError(null); }}
-                  className="text-[11px] text-black/25 hover:text-black/50 transition-colors font-sans-brand"
-                >
-                  Clear
-                </button>
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={downloadAsDocx}
+                    disabled={isDownloadingDocx}
+                    className="flex items-center gap-1 text-[11px] font-medium text-black/30 hover:text-black/60 transition-colors font-sans-brand disabled:opacity-40"
+                  >
+                    {isDownloadingDocx
+                      ? <Loader2 className="w-3 h-3 animate-spin" />
+                      : <Download className="w-3 h-3" />}
+                    {isDownloadingDocx ? 'Building…' : 'Download DOCX'}
+                  </button>
+                  <button
+                    onClick={() => { setResult(null); setError(null); }}
+                    className="text-[11px] text-black/25 hover:text-black/50 transition-colors font-sans-brand"
+                  >
+                    Clear
+                  </button>
+                </div>
               )}
             </div>
 

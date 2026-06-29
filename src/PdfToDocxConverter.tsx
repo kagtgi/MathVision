@@ -37,9 +37,10 @@ import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import remarkGfm from 'remark-gfm';
 import { latexToMathChildren, parseTextWithMath } from './utils/latexToDocxMath';
-import { latexToImage, tikzToImage } from './utils/latexToImage';
+import { sanitizeLatexExpr } from './utils/latexSanitizer';
+import { tikzToImage } from './utils/latexToImage';
 import { generateTikzMultiAgent, generateTikzSingleAgent } from './utils/tikzMultiAgent';
-import { GEMINI_MODEL, LATEX_MATH_RULES, ANTI_HALLUCINATION, OUTPUT_FORMAT_RULES } from './utils/sharedPrompts';
+import { GEMINI_MODEL, TEMP_PRECISE, LATEX_MATH_RULES, ANTI_HALLUCINATION, OUTPUT_FORMAT_RULES } from './utils/sharedPrompts';
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
@@ -49,7 +50,6 @@ const PDF_RENDER_SCALE = 2;
 const JPEG_QUALITY = 0.85;
 const JPEG_QUALITY_API = 0.7; // Lower quality for Gemini API (faster upload, same accuracy)
 const DOCX_MAX_IMAGE_WIDTH = 500; // points (~6.9 inches)
-const GEMINI_TEMPERATURE = 0.1;
 const API_TIMEOUT_MS = 120_000; // 120 seconds per page (pro model is slower)
 
 // ─── PDF.js Worker Setup ─────────────────────────────────────────────────────
@@ -68,11 +68,6 @@ interface DocumentElement {
   bbox?: number[];
   caption?: string;
   imageData?: string;     // base64 data URL for cropped image
-  equationImage?: {       // rendered equation as image
-    bytes: Uint8Array;
-    width: number;
-    height: number;
-  };
   tikzImage?: {           // compiled TikZ as image
     bytes: Uint8Array;
     width: number;
@@ -107,7 +102,7 @@ Rules:
 1. Extract ALL content top-to-bottom, left-to-right in reading order
 2. "heading": for titles, section headers, chapter titles. Use level 1, 2, or 3
 3. "paragraph": for text blocks. Wrap inline math with $...$ delimiters. Treat every mathematical expression as an image-to-LaTeX task — reproduce the exact notation, symbols, spacing, and structure visible in the image
-4. "equation": for standalone/display equations on their own line. Put LaTeX WITHOUT $ delimiters in the "latex" field. Convert with image-to-LaTeX quality: capture every symbol, subscript, superscript, fraction, operator, and decoration exactly as shown
+4. "equation": for standalone/display equations on their own line. Put LaTeX WITHOUT $ delimiters in the "latex" field. For single-line equations use plain LaTeX (e.g. "\\frac{a}{b} = c"). For multi-line aligned equations use: "\\begin{align*} f(x) &= x^2 + 1 \\\\\\\\ g(x) &= 2x \\end{align*}". Convert with image-to-LaTeX quality: capture every symbol, subscript, superscript, fraction, operator, and decoration exactly as shown
 5. "table": for tables. Each cell is a string. Use $...$ for LaTeX math or plain text in cells. Include header row as first row
 6. "image": for figures, diagrams, geometric drawings, charts, and graphs:
    - bbox = [x%, y%, width%, height%] as percentage of page dimensions — be VERY precise with bounding box coordinates
@@ -243,49 +238,27 @@ function buildDocx(pages: PageContent[], fileName: string): DocxDocument {
 
         case 'equation': {
           if (!el.latex) break;
-
-          // Prefer rendered equation image for highest quality
-          if (el.equationImage) {
-            const { bytes, width, height } = el.equationImage;
-            const maxWidth = DOCX_MAX_IMAGE_WIDTH;
-            const scale = width > maxWidth ? maxWidth / width : 1;
+          // Use OMML so equations are editable in Word/MathType (Toggle TeX).
+          // PNG images are non-editable — MathType cannot open them at all.
+          try {
+            const cleanLatex = sanitizeLatexExpr(el.latex);
+            const mathChildren = latexToMathChildren(cleanLatex);
             children.push(
               new Paragraph({
-                children: [
-                  new ImageRun({
-                    data: bytes,
-                    transformation: {
-                      width: Math.round(width * scale),
-                      height: Math.round(height * scale),
-                    },
-                    type: 'png',
-                  }),
-                ],
+                children: [new OfficeMath({ children: mathChildren })],
                 alignment: AlignmentType.CENTER,
                 spacing: { before: 120, after: 120 },
               })
             );
-          } else {
-            // Fallback: OMML equation
-            try {
-              const mathChildren = latexToMathChildren(el.latex);
-              children.push(
-                new Paragraph({
-                  children: [new OfficeMath({ children: mathChildren })],
-                  alignment: AlignmentType.CENTER,
-                  spacing: { before: 120, after: 120 },
-                })
-              );
-            } catch {
-              // Fallback: insert as text
-              children.push(
-                new Paragraph({
-                  children: [new TextRun({ text: el.latex, italics: true })],
-                  alignment: AlignmentType.CENTER,
-                  spacing: { before: 120, after: 120 },
-                })
-              );
-            }
+          } catch {
+            // Last resort: plain italic text so content is not lost
+            children.push(
+              new Paragraph({
+                children: [new TextRun({ text: el.latex, italics: true })],
+                alignment: AlignmentType.CENTER,
+                spacing: { before: 120, after: 120 },
+              })
+            );
           }
           break;
         }
@@ -902,7 +875,7 @@ export default function PdfToDocxConverter({ apiKey }: { apiKey: string }) {
             },
           ],
           config: {
-            temperature: GEMINI_TEMPERATURE,
+            temperature: TEMP_PRECISE,
           },
         });
 
@@ -1019,28 +992,6 @@ export default function PdfToDocxConverter({ apiKey }: { apiKey: string }) {
             } catch {
               setReasoningLog((prev) => [...prev, 'Single-agent fallback also failed.']);
             }
-          }
-        }
-
-        // Process equation elements in parallel for faster rendering
-        const equationElements = elements.filter((el) => el.type === 'equation' && el.latex);
-        if (equationElements.length > 0) {
-          if (controller.signal.aborted) return;
-          setProgress({
-            current: pageNum,
-            total: totalPages,
-            status: `Page ${pageNum}: rendering ${equationElements.length} equation(s)...`,
-          });
-
-          const eqResults = await Promise.allSettled(
-            equationElements.map((el) => latexToImage(el.latex!, true)),
-          );
-          for (let i = 0; i < equationElements.length; i++) {
-            const result = eqResults[i];
-            if (result.status === 'fulfilled') {
-              equationElements[i].equationImage = result.value;
-            }
-            // Failed equations fall back to OMML automatically
           }
         }
 

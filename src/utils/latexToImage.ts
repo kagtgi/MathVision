@@ -1,4 +1,5 @@
 import katex from 'katex';
+import _katexCssRaw from 'katex/dist/katex.min.css?raw';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -9,7 +10,9 @@ const EQUATION_PADDING_SIDE_PX = 12;
 const TIKZ_RENDER_TIMEOUT_MS = 30000;
 const MIN_TIKZ_DIMENSION = 100;
 
-const KATEX_CSS_URL = 'https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css';
+// Font base URL used to rewrite relative `url(fonts/...)` in bundled KaTeX CSS
+// so SVG foreignObject can load them from the CDN.
+const KATEX_FONT_CDN = 'https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/fonts/';
 
 // ─── TikZ preprocessing for TikZJax compatibility ───────────────────────────
 // TikZJax doesn't support PGF math functions (sqrt, sin, cos, etc.) in
@@ -115,6 +118,39 @@ export function preprocessTikzForTikzJax(code: string): string {
   return result;
 }
 
+// ─── TikZ render queue ───────────────────────────────────────────────────────
+// TikZJax is NOT concurrent-safe — it processes <script type="text/tikz"> elements
+// via a global MutationObserver. Running two renders simultaneously causes one to
+// silently hang or render the wrong figure. We serialise all tikzToImage calls.
+
+type RenderJob = () => void;
+
+let _tikzBusy = false;
+const _tikzQueue: RenderJob[] = [];
+
+function enqueueTikzRender<T>(fn: () => Promise<T>): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const job: RenderJob = () => {
+      fn()
+        .then(resolve, reject)
+        .finally(() => {
+          _tikzBusy = false;
+          const next = _tikzQueue.shift();
+          if (next) {
+            _tikzBusy = true;
+            next();
+          }
+        });
+    };
+    if (_tikzBusy) {
+      _tikzQueue.push(job);
+    } else {
+      _tikzBusy = true;
+      job();
+    }
+  });
+}
+
 // ─── Reusable canvas pool ─────────────────────────────────────────────────────
 
 let _reusableCanvas: HTMLCanvasElement | null = null;
@@ -131,28 +167,17 @@ export function getReusableCanvas(width: number, height: number): { canvas: HTML
   return { canvas: _reusableCanvas, ctx };
 }
 
-// ─── KaTeX CSS preload ────────────────────────────────────────────────────────
+// ─── KaTeX CSS (bundled, no CDN fetch needed) ─────────────────────────────────
+// Rewrite relative font URLs to absolute CDN paths so SVG foreignObject can load them.
 
-let _katexCssText: string | null = null;
-let _katexCssPromise: Promise<string> | null = null;
+const _katexCssText: string = _katexCssRaw.replace(
+  /url\(fonts\//g,
+  `url(${KATEX_FONT_CDN}`,
+);
 
 function getKatexCss(): Promise<string> {
-  if (_katexCssText) return Promise.resolve(_katexCssText);
-  if (!_katexCssPromise) {
-    _katexCssPromise = fetch(KATEX_CSS_URL)
-      .then((r) => r.text())
-      .then((css) => {
-        // Rewrite relative font URLs to absolute
-        _katexCssText = css.replace(/url\(fonts\//g, `url(https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/fonts/`);
-        return _katexCssText;
-      })
-      .catch(() => ''); // Fallback: empty CSS, will still use <link> tag
-  }
-  return _katexCssPromise;
+  return Promise.resolve(_katexCssText);
 }
-
-// Kick off CSS preload immediately on module load
-getKatexCss();
 
 // ─── Wait for next frame (replaces fixed 50ms delay) ──────────────────────────
 
@@ -212,11 +237,9 @@ export async function latexToImage(
   const html = container.innerHTML;
   document.body.removeChild(container);
 
-  // Use inlined CSS when available for faster SVG rendering (no external fetch per equation)
+  // CSS is always available (bundled via ?raw import) — no fallback needed
   const katexCss = await cssPromise;
-  const cssTag = katexCss
-    ? `<style>${katexCss}</style>`
-    : `<link rel="stylesheet" href="${KATEX_CSS_URL}" />`;
+  const cssTag = `<style>${katexCss}</style>`;
 
   // Build an SVG with foreignObject containing the KaTeX HTML
   const svgContent = `
@@ -280,7 +303,13 @@ export async function latexToImage(
  * @param tikzCode  Complete TikZ code (with \begin{tikzpicture}...\end{tikzpicture})
  * @returns { bytes, width, height } — PNG bytes and pixel dimensions, or null on failure
  */
-export async function tikzToImage(
+export function tikzToImage(
+  tikzCode: string,
+): Promise<{ bytes: Uint8Array; width: number; height: number } | null> {
+  return enqueueTikzRender(() => _tikzToImageImpl(tikzCode));
+}
+
+async function _tikzToImageImpl(
   tikzCode: string,
 ): Promise<{ bytes: Uint8Array; width: number; height: number } | null> {
   try {

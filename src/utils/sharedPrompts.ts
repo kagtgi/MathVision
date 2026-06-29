@@ -4,9 +4,12 @@
  * and anti-hallucination instructions.
  */
 
-// ─── Model ───────────────────────────────────────────────────────────────────
+// ─── Model & Temperature ─────────────────────────────────────────────────────
 
 export const GEMINI_MODEL = 'gemini-pro-latest';
+export const TEMP_PRECISE = 0.1;   // PDF page analysis, TikZ verify
+export const TEMP_STANDARD = 0.15; // Image→LaTeX
+export const TEMP_CREATIVE = 0.4;  // TikZ Draft B
 
 // ─── LaTeX Math Transcription Rules ──────────────────────────────────────────
 // Used by both Image→LaTeX (SYSTEM_INSTRUCTION) and PDF→DOCX (PDF_ANALYSIS_PROMPT)
@@ -25,7 +28,7 @@ export const LATEX_MATH_RULES = `
 **Angles**:
 - Angle at vertex B: $\\widehat{ABC}$ (Vietnamese default) or $\\angle ABC$
 - Use whichever notation the image shows; default $\\widehat{ABC}$
-- Degree values: $60{}^\\circ$ — always use {}^\\circ, never bare ° or ^\\circ
+- Degree values: $60^{\\circ}$ — always use ^{\\circ}, never bare ° or {}^\\circ
 
 **Shapes**:
 - Triangle: $\\triangle ABC$
@@ -56,15 +59,39 @@ export const LATEX_MATH_RULES = `
 
 ### Derivative and degree notation
 
-- Derivatives: $\\{f\\}'(x)$, $\\{y\\}''$ — wrap base in braces before prime
-- Degrees: $30{}^\\circ$ — braces before ^\\circ
+- Derivatives: $\{f\}'(x)$, $\{y\}''$ — wrap base in plain braces before prime
+- Degrees: $30^{\\circ}$ — always ^{\\circ}, never {}^\\circ or bare °
 
 ### Standard commands
-\\frac{a}{b}, \\int_{a}^{b} f(x)\\,dx, \\sum_{i=1}^{n}, \\lim_{x \\to \\infty}, \\sqrt{}, \\sqrt[n]{}, \\vec{v}, \\overrightarrow{AB}, \\alpha \\beta \\gamma \\theta \\pi \\Delta \\Sigma
+\\frac{a}{b}, \\dfrac{a}{b}, \\int_{a}^{b} f(x)\\,dx, \\sum_{i=1}^{n}, \\lim_{x \\to \\infty}, \\sqrt{}, \\sqrt[n]{}, \\vec{v}, \\overrightarrow{AB}, \\alpha \\beta \\gamma \\theta \\pi \\Delta \\Sigma
+
+### AMS-LaTeX commands (MathType compatible)
+
+- Display-style fraction: $\\dfrac{a}{b}$ — use when fraction needs to be taller inline
+- Binomial coefficient: $\\binom{n}{k}$
+- Underbrace with label: $\\underbrace{a + b + c}_{n \\text{ terms}}$
+- Overbrace with label: $\\overbrace{a + b + c}^{n \\text{ terms}}$
+- Custom operator: $\\operatorname{gcd}(a, b)$
+- Number sets: $\\mathbb{R}$, $\\mathbb{N}$, $\\mathbb{Z}$, $\\mathbb{Q}$, $\\mathbb{C}$
+- Bold vector (abstract): $\\boldsymbol{v}$ — geometric ray: $\\overrightarrow{AB}$
+- Stacked relation: $\\overset{\\text{def}}{=}$
+
+### Text in math
+
+- Words inside equations: $x + \\text{const}$, $\\text{if } x > 0$
+- Custom operators not in list: $\\operatorname{div} F$, $\\operatorname{rank} A$
+- Predefined (no \\operatorname needed): \\sin, \\cos, \\tan, \\log, \\ln, \\det, \\lim, \\max, \\min, \\gcd
+
+### MathType Toggle TeX — AVOID these (will break editable equations in Word):
+
+- \\color{...}, \\textcolor — appearance commands not supported
+- \\newcommand, \\def — macro definitions not supported
+- Bare label strings without operators (e.g. $abc$) — use $a + b + c$ or $\\text{abc}$
 
 ### Systems and matrices
 - Systems: $\\begin{cases} ... \\end{cases}$
 - Matrices: $\\begin{pmatrix} a & b \\\\ c & d \\end{pmatrix}$
+- Aligned (PDF→DOCX equation type only): \\begin{align*} f(x) &= x^2 \\\\ g(x) &= 2x \\end{align*}
 `;
 
 // ─── Anti-hallucination rules ────────────────────────────────────────────────

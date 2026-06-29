@@ -12,11 +12,10 @@
  */
 
 import { GoogleGenAI } from '@google/genai';
-import { TIKZJAX_COMPAT_RULES } from './sharedPrompts';
+import { GEMINI_MODEL, TIKZJAX_COMPAT_RULES, TEMP_PRECISE, TEMP_STANDARD, TEMP_CREATIVE } from './sharedPrompts';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
-const MODEL = 'gemini-pro-latest';
 const AGENT_TIMEOUT_MS = 120_000; // 2 minutes (reduced from 3 — Gemini Pro rarely needs >90s)
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -100,7 +99,16 @@ Rules:
 - Do not hallucinate labels, points, or decorations not in the image.
 - If both drafts miss a visible element, add it.
 - If both drafts include something NOT in the image, remove it.
-${TIKZJAX_COMPAT_RULES}`;
+${TIKZJAX_COMPAT_RULES}
+
+COMPILATION CHECKLIST — verify ALL before outputting FINAL_CODE:
+□ Every \\coordinate used is defined BEFORE first use (order matters)
+□ All \\usetikzlibrary entries are actually used in the code
+□ No PGF math functions (sqrt, sin, cos, pi) — all values pre-computed to decimals
+□ All node labels with math are wrapped in $...$, braces balanced
+□ \\pic angle references (C--B--A) use only defined coordinate names
+□ No unsupported commands: \\pgfmathsetmacro, \\foreach, \\draw plot, \\tikzset
+□ No function calls inside coordinate values — only plain numbers`;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -150,7 +158,7 @@ function callModel(
   temperature: number,
 ) {
   return ai.models.generateContent({
-    model: MODEL,
+    model: GEMINI_MODEL,
     contents: [{ role: 'user', parts }],
     config: { temperature },
   });
@@ -188,7 +196,7 @@ export async function generateTikzMultiAgent(
 
     try {
       const respB = await withTimeout(
-        callModel(ai, [{ text: DRAFT_B_PROMPT }, img], 0.4),
+        callModel(ai, [{ text: DRAFT_B_PROMPT }, img], TEMP_CREATIVE),
         AGENT_TIMEOUT_MS,
         'DraftB',
       );
@@ -207,12 +215,12 @@ export async function generateTikzMultiAgent(
     log.push('Step 1: Running two independent drafts in parallel...');
 
     const callA = withTimeout(
-      callModel(ai, [{ text: DRAFT_B_PROMPT }, img], 0.15),
+      callModel(ai, [{ text: DRAFT_B_PROMPT }, img], TEMP_STANDARD),
       AGENT_TIMEOUT_MS,
       'DraftA',
     );
     const callB = withTimeout(
-      callModel(ai, [{ text: DRAFT_B_PROMPT }, img], 0.4),
+      callModel(ai, [{ text: DRAFT_B_PROMPT }, img], TEMP_CREATIVE),
       AGENT_TIMEOUT_MS,
       'DraftB',
     );
@@ -269,7 +277,7 @@ export async function generateTikzMultiAgent(
         img,
         { text: `${draftText}\n\nVerify and produce the final code.` },
       ],
-      0.1,
+      TEMP_PRECISE,
     ),
     AGENT_TIMEOUT_MS,
     'Verifier',

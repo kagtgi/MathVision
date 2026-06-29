@@ -10,6 +10,17 @@ import {
   type MathComponent,
 } from 'docx';
 
+// ─── Blackboard Bold (\\mathbb) ──────────────────────────────────────────────
+
+const MATHBB: Record<string, string> = {
+  'A': '𝔸', 'B': '𝔹', 'C': 'ℂ', 'D': '𝔻', 'E': '𝔼',
+  'F': '𝔽', 'G': '𝔾', 'H': 'ℍ', 'I': '𝕀', 'J': '𝕁',
+  'K': '𝕂', 'L': '𝕃', 'M': '𝕄', 'N': 'ℕ', 'O': '𝕆',
+  'P': 'ℙ', 'Q': 'ℚ', 'R': 'ℝ', 'S': '𝕊', 'T': '𝕋',
+  'U': '𝕌', 'V': '𝕍', 'W': '𝕎', 'X': '𝕏', 'Y': '𝕐',
+  'Z': 'ℤ',
+};
+
 // ─── Greek Letters ───────────────────────────────────────────────────────────
 
 const GREEK: Record<string, string> = {
@@ -130,6 +141,24 @@ function tokenize(latex: string): Token[] {
   }
   tokens.push({ type: 'EOF', value: '' });
   return tokens;
+}
+
+// ─── Delimiter helper ────────────────────────────────────────────────────────
+
+function delimChar(value: string): string {
+  switch (value) {
+    case '.': return '';
+    case '\\{': return '{';
+    case '\\}': return '}';
+    case '\\|': return '‖';
+    case '\\lfloor': return '⌊';
+    case '\\rfloor': return '⌋';
+    case '\\lceil': return '⌈';
+    case '\\rceil': return '⌉';
+    case '\\langle': return '⟨';
+    case '\\rangle': return '⟩';
+    default: return value;
+  }
 }
 
 // ─── Parser ──────────────────────────────────────────────────────────────────
@@ -275,8 +304,7 @@ class LatexParser {
     // ── Decorators that take a group: \widehat{ABC}, \overrightarrow{AB}, etc. ──
     if (cmd === '\\widehat' || cmd === '\\hat') {
       const content = this.parseGroup();
-      // Render as the content with a hat description
-      return [new MathRun('̂'), ...content]; // combining circumflex
+      return [...content, new MathRun('̂')]; // combining circumflex AFTER base
     }
     if (cmd === '\\overrightarrow' || cmd === '\\vec') {
       const content = this.parseGroup();
@@ -301,8 +329,77 @@ class LatexParser {
       return [new MathSuperScript({ children: base, superScript: top })];
     }
 
-    // ── \text{...} ──
-    if (cmd === '\\text' || cmd === '\\textbf' || cmd === '\\textit' || cmd === '\\mathrm' || cmd === '\\mathbf' || cmd === '\\mathit' || cmd === '\\mathcal' || cmd === '\\mathbb') {
+    // ── Style/size modifiers — irrelevant in OMML, skip ──
+    if (cmd === '\\displaystyle' || cmd === '\\textstyle' || cmd === '\\scriptstyle' || cmd === '\\scriptscriptstyle') {
+      return [];
+    }
+    if (cmd === '\\limits' || cmd === '\\nolimits') {
+      return [];
+    }
+
+    // ── \mathbb{R} → Unicode blackboard bold ──
+    if (cmd === '\\mathbb') {
+      // Peek inside the group to map single letters before constructing MathRun
+      if (this.peek().type === 'OPEN_BRACE') {
+        this.consume(); // {
+        const inner = this.peek();
+        if (inner.type === 'TEXT' && MATHBB[inner.value]) {
+          this.consume(); // letter
+          if (this.peek().type === 'CLOSE_BRACE') this.consume(); // }
+          return [new MathRun(MATHBB[inner.value])];
+        }
+        // Multi-char or unmapped content — parse normally
+        const content = this.parseExpression();
+        if (this.peek().type === 'CLOSE_BRACE') this.consume();
+        return content;
+      }
+      return this.parseAtom();
+    }
+
+    // ── \operatorname{name} → upright operator text ──
+    if (cmd === '\\operatorname' || cmd === '\\boldsymbol') {
+      const content = this.parseGroup();
+      return content;
+    }
+
+    // ── \underbrace{expr}_{label} ──
+    if (cmd === '\\underbrace') {
+      const content = this.parseGroup();
+      if (this.peek().type === 'UNDERSCORE') {
+        this.consume();
+        const label = this.parseGroup();
+        return [new MathSubScript({ children: content, subScript: label })];
+      }
+      return content;
+    }
+
+    // ── \overbrace{expr}^{label} ──
+    if (cmd === '\\overbrace') {
+      const content = this.parseGroup();
+      if (this.peek().type === 'CARET') {
+        this.consume();
+        const label = this.parseGroup();
+        return [new MathSuperScript({ children: content, superScript: label })];
+      }
+      return content;
+    }
+
+    // ── \binom{n}{k} ──
+    if (cmd === '\\binom' || cmd === '\\dbinom' || cmd === '\\tbinom') {
+      const top = this.parseGroup();
+      const bot = this.parseGroup();
+      return [new MathRun('C('), ...top, new MathRun(', '), ...bot, new MathRun(')')];
+    }
+
+    // ── \cfrac — continued fraction (same rendering as \frac in OMML) ──
+    if (cmd === '\\cfrac') {
+      const num = this.parseGroup();
+      const den = this.parseGroup();
+      return [new MathFraction({ numerator: num, denominator: den })];
+    }
+
+    // ── \text{...} and font commands ──
+    if (cmd === '\\text' || cmd === '\\textbf' || cmd === '\\textit' || cmd === '\\mathrm' || cmd === '\\mathbf' || cmd === '\\mathit' || cmd === '\\mathcal') {
       const content = this.parseGroup();
       return content;
     }
@@ -310,7 +407,7 @@ class LatexParser {
     // ── \left ... \right ──
     if (cmd === '\\left') {
       const openDelim = this.consume();
-      const openChar = openDelim.value === '.' ? '' : (openDelim.value === '\\{' ? '{' : openDelim.value);
+      const openChar = delimChar(openDelim.value);
       const content = this.parseExpression();
 
       // Consume \right
@@ -318,7 +415,7 @@ class LatexParser {
       if (this.peek().type === 'COMMAND' && this.peek().value === '\\right') {
         this.consume(); // \right
         const closeDelim = this.consume();
-        closeChar = closeDelim.value === '.' ? '' : (closeDelim.value === '\\}' ? '}' : closeDelim.value);
+        closeChar = delimChar(closeDelim.value);
       }
 
       const result: MathComponent[] = [];

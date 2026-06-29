@@ -8,7 +8,8 @@ import rehypeKatex from 'rehype-katex';
 import { motion } from 'framer-motion';
 import PdfToDocxConverter from './PdfToDocxConverter';
 import { waitForTikzSvg, preprocessTikzForTikzJax } from './utils/latexToImage';
-import { GEMINI_MODEL, LATEX_MATH_RULES, ANTI_HALLUCINATION, OUTPUT_FORMAT_RULES, TIKZJAX_COMPAT_RULES } from './utils/sharedPrompts';
+import { GEMINI_MODEL, TEMP_STANDARD, LATEX_MATH_RULES, ANTI_HALLUCINATION, OUTPUT_FORMAT_RULES, TIKZJAX_COMPAT_RULES } from './utils/sharedPrompts';
+import { sanitizeLatexBlock, warnMismatchedDollars } from './utils/latexSanitizer';
 
 type AppMode = 'image-to-latex' | 'pdf-to-docx';
 
@@ -71,18 +72,30 @@ plain text (no dollar signs)
 
 RULES for formulas:
 - Every math expression wrapped in $...$
-- Fractions: \\frac{a}{b} — NEVER write a/b
+- Fractions: \\frac{a}{b} — NEVER write a/b; use \\dfrac{a}{b} when the fraction should appear taller
 - Roots: \\sqrt{x}, \\sqrt[3]{8}
 - Vietnamese angles: \\widehat{ABC} (default) or \\angle ABC
-- Degrees: $60{}^\\circ$ — always use {}^\\circ
+- Degrees: $60^{\\circ}$ — always ^{\\circ}, never {}^\\circ or bare °
 - Absolute value: $\\left| x \\right|$
 - Brackets: always \\left( \\right), \\left[ \\right], \\left\\{ \\right\\}
-- Derivatives: $\\{f\\}'(x)$, $\\{y\\}''$
+- Derivatives: $\{f\}'(x)$, $\{y\}''$ — plain grouping braces (not \\{)
 - Vietnamese decimals: $3{,}14$
-- Vectors/rays: \\overrightarrow{AB}; segments: $AB$
-- Never use \\[ \\], align, equation, gather, or any display environment
-- Never use \\textbf, \\textit, \\emph, \\color
+- Vectors/rays: \\overrightarrow{AB}; abstract vectors: \\boldsymbol{v}; segments: $AB$
+- Number sets: $\\mathbb{R}$, $\\mathbb{N}$, $\\mathbb{Z}$, $\\mathbb{Q}$
+- Never wrap output in \\[ \\] — use $...$ per expression, one per line
+- Multi-line structures go INSIDE $...$: $\\begin{cases}...\\end{cases}$, $\\begin{pmatrix}...\\end{pmatrix}$
+- Never use top-level align, equation, gather as output wrappers
+- Never use \\textbf, \\textit, \\emph, \\color, \\newcommand, \\def
 - Plain text labels or problem numbers → outside $...$
+
+EXAMPLES of correct output:
+$x = \\dfrac{-b \\pm \\sqrt{b^2 - 4ac}}{2a}$
+$\\lim_{x \\to 0} \\dfrac{\\sin x}{x} = 1$
+$\\int_{0}^{\\pi} \\sin x \\, dx = 2$
+$\\overrightarrow{AB} = \\overrightarrow{AC} + \\overrightarrow{CB}$
+$\\triangle ABC \\cong \\triangle DEF$
+$\\widehat{BAC} = 60^{\\circ}$
+$\\begin{cases} 2x + y = 5 \\\\ x - y = 1 \\end{cases}$
 ${LATEX_MATH_RULES}
 
 ## STEP 2C — For BOTH → Two separate code blocks
@@ -203,7 +216,7 @@ export default function App() {
             { text: 'Convert this image to LaTeX/TikZ code following the instructions above.' },
           ],
         }],
-        config: { temperature: 0.15 },
+        config: { temperature: TEMP_STANDARD },
       });
 
       const output = response.text?.trim() || '';
@@ -505,7 +518,9 @@ function parseOutputBlocks(content: string): { tikzBlocks: string[]; latexBlocks
     if (code.includes('\\begin{tikzpicture}')) {
       tikzBlocks.push(code);
     } else {
-      latexBlocks.push(code);
+      const sanitized = sanitizeLatexBlock(code);
+      warnMismatchedDollars(sanitized, 'LaTeX block');
+      latexBlocks.push(sanitized);
     }
   }
 
@@ -827,7 +842,8 @@ function TikzRendererWithRef({ code, onImageReady }: { code: string, onImageRead
         const localCanvas = document.createElement('canvas');
         localCanvas.width = w;
         localCanvas.height = h;
-        const localCtx = localCanvas.getContext('2d')!;
+        const localCtx = localCanvas.getContext('2d');
+        if (!localCtx) { cleanup(); return; }
         localCtx.fillStyle = 'white';
         localCtx.fillRect(0, 0, w, h);
         localCtx.drawImage(img, 0, 0, w, h);

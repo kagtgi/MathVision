@@ -247,257 +247,272 @@ export default function App() {
 
   if (!apiKeySubmitted) {
     return (
-      <div className="min-h-screen bg-[#f8f7f4] flex items-center justify-center p-4">
+      <div className="min-h-screen bg-[#0c1017] flex items-center justify-center p-6">
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          className="bg-white rounded-2xl shadow-lg border border-[#00186E]/10 p-8 max-w-md w-full"
+          transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
+          className="w-full max-w-sm"
         >
-          <div className="flex items-center gap-3 mb-6">
-            <div className="w-10 h-10 bg-[#00186E] rounded-xl flex items-center justify-center text-white font-bold text-2xl">
-              ∑
+          {/* Wordmark */}
+          <div className="flex items-center gap-3 mb-10">
+            <div className="w-11 h-11 bg-[#FFAD1D] rounded-xl flex items-center justify-center shadow-[0_0_28px_rgba(255,173,29,0.22)]">
+              <span className="text-[#0c1017] font-bold text-2xl font-serif-brand leading-none select-none">∑</span>
             </div>
             <div>
-              <h1 className="text-xl font-semibold text-[#00186E] font-serif-brand">MathVision</h1>
-              <p className="text-sm text-[#00186E]/50 font-sans-brand">LaTeX & TikZ Assistant</p>
+              <h1 className="text-xl font-semibold text-white font-serif-brand tracking-tight leading-none">MathVision</h1>
+              <p className="text-xs text-white/30 mt-0.5 tracking-wide font-sans-brand">LaTeX · TikZ · DOCX</p>
             </div>
           </div>
 
-          <div className="mb-6">
-            <label htmlFor="api-key" className="block text-sm font-medium text-[#00186E]/70 mb-2 font-sans-brand">
-              <Key className="w-4 h-4 inline mr-1.5 -mt-0.5" />
+          {/* Card */}
+          <div className="bg-[#131924] border border-[#1f2e45] rounded-2xl p-6 shadow-[0_24px_64px_rgba(0,0,0,0.5)]">
+            <label htmlFor="api-key" className="block text-[11px] font-semibold text-white/35 mb-2.5 tracking-widest uppercase font-sans-brand">
               Gemini API Key
             </label>
-            <input
-              id="api-key"
-              type="password"
-              value={apiKey}
-              onChange={(e) => setApiKey(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter' && apiKey.trim()) setApiKeySubmitted(true); }}
-              placeholder="Enter your Gemini API key..."
-              className="w-full px-4 py-3 border border-[#00186E]/20 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#FFAD1D] focus:border-[#FFAD1D] transition-colors font-sans-brand"
-            />
-            <p className="mt-2 text-xs text-[#00186E]/50 font-sans-brand">
-              Get your free API key from{' '}
-              <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer" className="text-[#FFAD1D] hover:underline font-medium">
-                Google AI Studio
-              </a>. Your key is only used in your browser and never stored on any server.
+            <div className="relative">
+              <Key className="absolute left-3.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-white/20 pointer-events-none" />
+              <input
+                id="api-key"
+                type="password"
+                value={apiKey}
+                onChange={(e) => setApiKey(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter' && apiKey.trim()) setApiKeySubmitted(true); }}
+                placeholder="AIza…"
+                className="w-full bg-[#0c1017] border border-[#1f2e45] rounded-xl pl-10 pr-4 py-3 text-sm text-white placeholder-white/15 focus:outline-none focus:border-[#FFAD1D]/60 focus:ring-2 focus:ring-[#FFAD1D]/10 transition-all font-mono tracking-wide"
+              />
+            </div>
+            <p className="mt-3 text-xs text-white/22 leading-relaxed font-sans-brand">
+              Free key at{' '}
+              <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer" className="text-[#FFAD1D]/60 hover:text-[#FFAD1D] transition-colors">
+                aistudio.google.com
+              </a>
+              {' '}— runs only in your browser.
             </p>
-          </div>
 
-          <button
-            onClick={() => { if (apiKey.trim()) setApiKeySubmitted(true); }}
-            disabled={!apiKey.trim()}
-            className="w-full bg-[#00186E] hover:bg-[#001050] text-white font-medium py-3 px-4 rounded-xl shadow-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed font-sans-brand"
-          >
-            Start Using MathVision
-          </button>
+            <button
+              onClick={() => { if (apiKey.trim()) setApiKeySubmitted(true); }}
+              disabled={!apiKey.trim()}
+              className="btn-gold mt-5 w-full text-[#0c1017] font-semibold py-3 px-4 rounded-xl text-sm font-sans-brand"
+            >
+              Open MathVision
+            </button>
+          </div>
         </motion.div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-[#f8f7f4] text-[#00186E]">
-      <header className="bg-[#00186E] sticky top-0 z-10">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 bg-[#FFAD1D] rounded-lg flex items-center justify-center text-[#00186E] font-bold text-xl">
-                ∑
-              </div>
-              <h1 className="text-xl font-semibold tracking-tight text-white font-serif-brand">MathVision</h1>
-            </div>
+    <div className="h-full flex flex-col bg-[#0c1017] text-[#c8d3e8] overflow-hidden">
 
-            {/* Mode Tabs */}
-            <div className="hidden sm:flex items-center ml-4 bg-white/10 rounded-lg p-0.5">
-              <button
-                onClick={() => setAppMode('image-to-latex')}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all font-sans-brand ${
-                  appMode === 'image-to-latex'
-                    ? 'bg-[#FFAD1D] text-[#00186E] shadow-sm'
-                    : 'text-white/60 hover:text-white'
-                }`}
-              >
-                <ImageIcon className="w-3.5 h-3.5" />
-                Image → LaTeX
-              </button>
-              <button
-                onClick={() => setAppMode('pdf-to-docx')}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all font-sans-brand ${
-                  appMode === 'pdf-to-docx'
-                    ? 'bg-[#FFAD1D] text-[#00186E] shadow-sm'
-                    : 'text-white/60 hover:text-white'
-                }`}
-              >
-                <FileText className="w-3.5 h-3.5" />
-                PDF → DOCX
-              </button>
+      {/* ── Minimal header ── */}
+      <header className="shrink-0 h-11 bg-[#0d1322] border-b border-[#1f2e45] flex items-center justify-between px-4 z-10">
+        <div className="flex items-center gap-1">
+          {/* Wordmark */}
+          <div className="flex items-center gap-2 mr-3">
+            <div className="w-6 h-6 bg-[#FFAD1D] rounded-md flex items-center justify-center shadow-[0_0_12px_rgba(255,173,29,0.2)]">
+              <span className="text-[#0c1017] font-bold text-[11px] font-serif-brand leading-none select-none">∑</span>
             </div>
+            <span className="text-white/65 font-semibold text-[13px] font-serif-brand tracking-tight">MathVision</span>
           </div>
-          <div className="flex items-center gap-3">
-            {/* Mobile mode toggle */}
+          {/* Mode pills */}
+          <div className="flex bg-[#0a0f1a] rounded-lg p-0.5 gap-0.5">
             <button
-              onClick={() => setAppMode(appMode === 'image-to-latex' ? 'pdf-to-docx' : 'image-to-latex')}
-              className="sm:hidden flex items-center gap-1.5 text-xs text-white/60 hover:text-white border border-white/20 rounded-lg px-2.5 py-1.5 transition-colors font-sans-brand"
+              onClick={() => setAppMode('image-to-latex')}
+              className={`flex items-center gap-1.5 px-3 py-1 rounded-md text-[11px] font-medium transition-all font-sans-brand ${
+                appMode === 'image-to-latex'
+                  ? 'bg-[#1a2438] text-[#FFAD1D]'
+                  : 'text-white/25 hover:text-white/50'
+              }`}
             >
-              <ArrowRightLeft className="w-3.5 h-3.5" />
-              {appMode === 'image-to-latex' ? 'PDF → DOCX' : 'Image → LaTeX'}
+              <ImageIcon className="w-3 h-3" />
+              Image → LaTeX
             </button>
             <button
-              onClick={() => { setApiKey(''); setApiKeySubmitted(false); setResult(null); setError(null); }}
-              className="text-xs text-white/50 hover:text-white border border-white/20 rounded-lg px-2.5 py-1.5 transition-colors font-sans-brand"
+              onClick={() => setAppMode('pdf-to-docx')}
+              className={`flex items-center gap-1.5 px-3 py-1 rounded-md text-[11px] font-medium transition-all font-sans-brand ${
+                appMode === 'pdf-to-docx'
+                  ? 'bg-[#1a2438] text-[#FFAD1D]'
+                  : 'text-white/25 hover:text-white/50'
+              }`}
             >
-              Change API Key
+              <FileText className="w-3 h-3" />
+              PDF → DOCX
             </button>
           </div>
         </div>
+
+        <button
+          onClick={() => { setApiKey(''); setApiKeySubmitted(false); setResult(null); setError(null); }}
+          className="flex items-center gap-1.5 text-[11px] text-white/25 hover:text-white/50 border border-white/8 hover:border-white/15 rounded-lg px-2.5 py-1 transition-all font-sans-brand"
+        >
+          <Key className="w-3 h-3" />
+          API Key
+        </button>
       </header>
 
+      {/* ── Workspace ── */}
       {appMode === 'pdf-to-docx' ? (
         <PdfToDocxConverter apiKey={apiKey} />
       ) : (
-        <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
-            {/* Left Column — Input */}
-            <div className="space-y-6">
-              {/* Upload Section */}
-              <div className="bg-white rounded-2xl shadow-sm border border-[#00186E]/10 overflow-hidden">
-                <div className="p-4 border-b border-[#00186E]/5 bg-[#00186E]/[0.02]">
-                  <h2 className="font-medium text-[#00186E] flex items-center gap-2 font-sans-brand">
-                    <ImageIcon className="w-4 h-4 text-[#FFAD1D]" />
-                    Input Image
-                  </h2>
-                </div>
+        <div className="flex-1 flex overflow-hidden min-h-0">
 
-                <div className="p-4">
-                  {!imagePreview ? (
-                    <div
-                      {...getRootProps()}
-                      role="button"
-                      aria-label="Upload an image of math content"
-                      className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-colors duration-200 ${
-                        isDragActive ? 'border-[#FFAD1D] bg-[#FFAD1D]/10' : 'border-[#00186E]/20 hover:border-[#FFAD1D] hover:bg-[#FFAD1D]/5'
-                      }`}
-                    >
-                      <input {...getInputProps()} />
-                      <Upload className="w-10 h-10 text-[#00186E]/30 mx-auto mb-4" />
-                      <p className="text-sm font-medium text-[#00186E]/70 mb-1 font-sans-brand">
-                        Drag & drop an image here
-                      </p>
-                      <p className="text-xs text-[#00186E]/40 font-sans-brand">
-                        or click to select a file (PNG, JPG, WebP — max 20MB)
-                      </p>
-                    </div>
-                  ) : (
-                    <div className="space-y-4">
-                      <div className="relative rounded-xl overflow-hidden border border-[#00186E]/10 bg-[#f8f7f4] group">
-                        <img
-                          src={imagePreview}
-                          alt="Uploaded math content"
-                          className="w-full h-auto max-h-[400px] object-contain"
-                        />
-                        <div className="absolute inset-0 bg-[#00186E]/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                          <button
-                            {...getRootProps()}
-                            className="bg-white text-[#00186E] px-4 py-2 rounded-lg text-sm font-medium shadow-sm hover:bg-[#f8f7f4] transition-colors font-sans-brand"
-                          >
-                            <input {...getInputProps()} />
-                            Replace Image
-                          </button>
+          {/* ─── LEFT: dark input workspace ─── */}
+          <div className="w-[360px] xl:w-[400px] shrink-0 flex flex-col border-r border-[#1f2e45] overflow-hidden">
+            {/* Panel label */}
+            <div className="shrink-0 px-4 py-2.5 border-b border-[#1f2e45]">
+              <span className="text-[10px] font-semibold text-white/20 uppercase tracking-widest font-sans-brand">Source Image</span>
+            </div>
+
+            <div className="flex-1 overflow-y-auto scrollbar-dark p-4">
+              {!imagePreview ? (
+                /* ── Drop zone ── */
+                <div
+                  {...getRootProps()}
+                  role="button"
+                  aria-label="Upload an image of math content"
+                  className={`relative rounded-xl overflow-hidden cursor-pointer transition-all duration-200 group ${
+                    isDragActive
+                      ? 'ring-2 ring-[#FFAD1D] ring-offset-2 ring-offset-[#0c1017]'
+                      : 'hover:ring-1 hover:ring-white/10'
+                  }`}
+                  style={{ minHeight: '300px' }}
+                >
+                  <input {...getInputProps()} />
+                  {/* Graph-paper ground */}
+                  <div className="graph-bg absolute inset-0 rounded-xl" />
+                  {/* Content */}
+                  <div className="relative flex flex-col items-center justify-center py-14 text-center">
+                    {isDragActive ? (
+                      <>
+                        <div className="w-14 h-14 rounded-2xl bg-[#FFAD1D]/15 border border-[#FFAD1D]/30 flex items-center justify-center mb-3">
+                          <Upload className="w-6 h-6 text-[#FFAD1D]" />
                         </div>
-                      </div>
-
+                        <p className="text-sm font-medium text-[#FFAD1D] font-sans-brand">Release to upload</p>
+                      </>
+                    ) : (
+                      <>
+                        {/* Giant decorative ∫ — the aesthetic risk */}
+                        <div className="absolute inset-0 flex items-center justify-center pointer-events-none select-none overflow-hidden rounded-xl">
+                          <span className="text-[140px] font-serif-brand text-white/[0.032] leading-none -mt-4">∫</span>
+                        </div>
+                        <div className="w-10 h-10 rounded-xl bg-[#1a2438] border border-[#1f2e45] flex items-center justify-center mb-3 group-hover:border-[#FFAD1D]/30 group-hover:bg-[#FFAD1D]/8 transition-all">
+                          <Upload className="w-4.5 h-4.5 text-white/30 group-hover:text-[#FFAD1D]/60 transition-colors" />
+                        </div>
+                        <p className="text-sm font-medium text-white/50 mb-1 font-sans-brand group-hover:text-white/70 transition-colors">Drop image here</p>
+                        <p className="text-xs text-white/22 font-sans-brand">PNG · JPG · WebP — max 20 MB</p>
+                      </>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                /* ── Image preview + convert ── */
+                <div className="space-y-3">
+                  <div className="relative rounded-xl overflow-hidden border border-[#1f2e45] bg-[#101623] group" style={{ maxHeight: '320px' }}>
+                    <img
+                      src={imagePreview}
+                      alt="Uploaded math content"
+                      className="w-full h-auto max-h-[320px] object-contain"
+                    />
+                    <div className="absolute inset-0 bg-black/55 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                       <button
-                        onClick={processImage}
-                        disabled={isProcessing}
-                        className="w-full bg-[#FFAD1D] hover:bg-[#e89c10] text-[#00186E] font-semibold py-3 px-4 rounded-xl shadow-sm transition-colors disabled:opacity-70 disabled:cursor-not-allowed flex items-center justify-center gap-2 font-sans-brand"
+                        {...getRootProps()}
+                        className="bg-white/10 backdrop-blur-sm text-white/90 border border-white/20 px-4 py-2 rounded-lg text-xs font-medium hover:bg-white/18 transition-colors font-sans-brand"
                       >
-                        {isProcessing ? (
-                          <>
-                            <Loader2 className="w-5 h-5 animate-spin" />
-                            Converting…
-                          </>
-                        ) : result ? (
-                          'Convert Again'
-                        ) : (
-                          'Convert to LaTeX'
-                        )}
+                        <input {...getInputProps()} />
+                        Replace image
                       </button>
                     </div>
-                  )}
-                </div>
-              </div>
+                  </div>
 
-              {/* Instructions Card */}
-              <div className="bg-[#B9CF7C]/20 rounded-2xl border border-[#B9CF7C]/40 p-5">
-                <h3 className="text-sm font-semibold text-[#00186E] mb-2 font-sans-brand">How it works</h3>
-                <ul className="text-sm text-[#00186E]/70 space-y-2 list-disc list-inside font-serif-brand">
-                  <li>Upload a photo or screenshot of math problems or geometric figures.</li>
-                  <li>The AI will generate compilable <strong>TikZ</strong> code for geometry.</li>
-                  <li>It will generate clean <strong>LaTeX</strong> for formulas (MathType compatible).</li>
-                  <li>Results are formatted exactly as shown, without solving.</li>
-                </ul>
-              </div>
+                  <button
+                    onClick={processImage}
+                    disabled={isProcessing}
+                    className="btn-gold w-full text-[#0c1017] font-semibold py-3 px-4 rounded-xl text-sm flex items-center justify-center gap-2 font-sans-brand"
+                  >
+                    {isProcessing ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        Converting…
+                      </>
+                    ) : result ? (
+                      <>
+                        <ArrowRightLeft className="w-4 h-4" />
+                        Convert Again
+                      </>
+                    ) : (
+                      <>
+                        Convert to LaTeX
+                        <ArrowRightLeft className="w-4 h-4" />
+                      </>
+                    )}
+                  </button>
+                </div>
+              )}
             </div>
 
-            {/* Right Column — Output */}
-            <div className="lg:sticky lg:top-24">
-              <div className="bg-white rounded-2xl shadow-sm border border-[#00186E]/10 min-h-[400px] lg:min-h-[calc(100vh-8rem)] flex flex-col overflow-hidden">
-                <div className="px-4 py-3 border-b border-[#00186E]/5 bg-[#00186E]/[0.02] flex items-center justify-between">
-                  <h2 className="font-medium text-[#00186E] font-sans-brand text-sm">Output</h2>
-                  {result && !isProcessing && (
-                    <button
-                      onClick={() => { setResult(null); setError(null); }}
-                      className="text-xs text-[#00186E]/40 hover:text-[#00186E] border border-[#00186E]/15 hover:border-[#00186E]/30 rounded-lg px-2.5 py-1 transition-colors font-sans-brand"
-                    >
-                      Clear
-                    </button>
-                  )}
-                </div>
-
-                <div className="flex-1 overflow-y-auto">
-                  {isProcessing ? (
-                    <div className="h-full flex flex-col items-center justify-center text-[#00186E]/40 gap-3 p-8">
-                      <Loader2 className="w-9 h-9 animate-spin text-[#FFAD1D]" />
-                      <p className="text-sm font-medium font-sans-brand text-[#00186E]/60">
-                        {processingStatus || 'Analyzing image…'}
-                      </p>
-                    </div>
-                  ) : error ? (
-                    <div className="p-4">
-                      <div className="bg-red-50 text-red-800 rounded-xl p-4 flex items-start gap-3 border border-red-100">
-                        <AlertCircle className="w-5 h-5 text-red-500 shrink-0 mt-0.5" />
-                        <div className="flex-1 min-w-0">
-                          <p className="font-medium mb-1 font-sans-brand text-sm">Error</p>
-                          <p className="text-sm text-red-700/90 font-sans-brand">{error}</p>
-                          <button
-                            onClick={processImage}
-                            className="mt-3 text-xs font-medium text-red-700 hover:text-red-900 underline underline-offset-2 font-sans-brand"
-                          >
-                            Try again
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  ) : result ? (
-                    <div className="p-4">
-                      <ResultRenderer content={result} />
-                    </div>
-                  ) : (
-                    <div className="h-full flex flex-col items-center justify-center text-[#00186E]/30 p-8 text-center">
-                      <div className="w-14 h-14 bg-[#00186E]/5 rounded-full flex items-center justify-center mb-3">
-                        <span className="text-xl font-serif-brand italic text-[#00186E]/20">f(x)</span>
-                      </div>
-                      <p className="text-sm font-medium text-[#00186E]/40 font-sans-brand">No output yet</p>
-                      <p className="text-xs text-[#00186E]/25 mt-1 max-w-xs font-sans-brand">Upload an image and click "Convert to LaTeX".</p>
-                    </div>
-                  )}
-                </div>
-              </div>
+            {/* Bottom hint strip */}
+            <div className="shrink-0 px-4 py-2.5 border-t border-[#1f2e45]">
+              <p className="text-[10px] text-white/18 font-sans-brand leading-relaxed">
+                Geometry → TikZ &nbsp;·&nbsp; Equations → LaTeX &nbsp;·&nbsp; MathType compatible
+              </p>
             </div>
           </div>
-        </main>
+
+          {/* ─── RIGHT: light output — simulates a document page ─── */}
+          <div className="flex-1 flex flex-col bg-[#f8f7f4] overflow-hidden min-w-0">
+            {/* Output header */}
+            <div className="shrink-0 px-4 py-2.5 border-b border-black/6 bg-white/50 flex items-center justify-between">
+              <span className="text-[10px] font-semibold text-black/25 uppercase tracking-widest font-sans-brand">Output</span>
+              {result && !isProcessing && (
+                <button
+                  onClick={() => { setResult(null); setError(null); }}
+                  className="text-[11px] text-black/25 hover:text-black/50 transition-colors font-sans-brand"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+
+            <div className="flex-1 overflow-y-auto scrollbar-light">
+              {isProcessing ? (
+                <div className="h-full flex flex-col items-center justify-center gap-4 text-black/30">
+                  <Loader2 className="w-7 h-7 animate-spin text-[#FFAD1D]" />
+                  <p className="text-sm font-medium text-black/40 font-sans-brand">
+                    {processingStatus || 'Analyzing image…'}
+                  </p>
+                </div>
+              ) : error ? (
+                <div className="p-5">
+                  <div className="bg-red-50 text-red-900 rounded-xl p-4 flex items-start gap-3 border border-red-100/80">
+                    <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold mb-1 font-sans-brand">Error</p>
+                      <p className="text-sm text-red-700/80 font-sans-brand">{error}</p>
+                      <button
+                        onClick={processImage}
+                        className="mt-2.5 text-xs font-medium text-red-600 hover:text-red-800 underline underline-offset-2 font-sans-brand"
+                      >
+                        Try again
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ) : result ? (
+                <div className="p-5">
+                  <ResultRenderer content={result} />
+                </div>
+              ) : (
+                <div className="h-full flex flex-col items-center justify-center select-none">
+                  <span className="text-[72px] font-serif-brand leading-none text-black/[0.045] mb-3">f(x)</span>
+                  <p className="text-sm font-medium text-black/25 font-sans-brand">Output appears here</p>
+                  <p className="text-xs text-black/15 mt-1 font-sans-brand">Upload an image to begin</p>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
@@ -562,7 +577,7 @@ function ResultRenderer({ content }: { content: string }) {
 
       {/* 5 — Plain text (error / unreadable message) */}
       {!hasBlocks && plainText && (
-        <p className="p-4 text-sm text-[#00186E]/70 font-sans-brand">{plainText}</p>
+        <p className="p-4 text-sm text-black/50 font-sans-brand">{plainText}</p>
       )}
     </div>
   );
@@ -605,7 +620,7 @@ function LatexSection({ code }: { code: string }) {
         title="LaTeX Preview"
         icon={<Eye className="w-3.5 h-3.5 mr-1" />}
       >
-        <div className="text-[#00186E] overflow-auto prose prose-slate max-w-none">
+        <div className="text-[#1a2035] overflow-auto prose prose-slate max-w-none">
           <ReactMarkdown
             remarkPlugins={[remarkMath]}
             rehypePlugins={[rehypeKatex]}
@@ -644,16 +659,16 @@ function CopyCodeButton({ code }: { code: string }) {
     <button
       onClick={handleCopy}
       aria-label="Copy code to clipboard"
-      className="flex items-center gap-1.5 text-xs font-medium text-white/50 hover:text-white transition-colors font-sans-brand"
+      className="flex items-center gap-1 text-[11px] font-medium text-white/30 hover:text-white/70 transition-colors font-sans-brand"
     >
       {copied ? (
         <>
-          <CheckCircle2 className="w-3.5 h-3.5 text-[#B9CF7C]" />
+          <CheckCircle2 className="w-3 h-3 text-[#B9CF7C]" />
           <span className="text-[#B9CF7C]">Copied</span>
         </>
       ) : (
         <>
-          <Copy className="w-3.5 h-3.5" />
+          <Copy className="w-3 h-3" />
           <span>Copy</span>
         </>
       )}
@@ -675,7 +690,7 @@ function DownloadImageButton({ imageDataUrl }: { imageDataUrl: string }) {
     <button
       onClick={handleDownload}
       aria-label="Download image as PNG"
-      className="flex items-center gap-1.5 text-xs font-medium text-[#00186E]/50 hover:text-[#00186E] transition-colors font-sans-brand"
+      className="flex items-center gap-1.5 text-xs font-medium text-black/30 hover:text-black/60 transition-colors font-sans-brand"
     >
       <ImageDown className="w-3.5 h-3.5" />
       <span>Download</span>
@@ -708,7 +723,7 @@ function CopyImageButton({ imageDataUrl }: { imageDataUrl: string }) {
     <button
       onClick={handleCopyImage}
       aria-label="Copy image to clipboard"
-      className="flex items-center gap-1.5 text-xs font-medium text-[#00186E]/50 hover:text-[#00186E] transition-colors font-sans-brand"
+      className="flex items-center gap-1.5 text-xs font-medium text-black/30 hover:text-black/60 transition-colors font-sans-brand"
     >
       {copied ? (
         <>
@@ -727,9 +742,9 @@ function CopyImageButton({ imageDataUrl }: { imageDataUrl: string }) {
 
 function PreviewBlock({ title, icon, children, actions }: { title: string, icon: React.ReactNode, children: React.ReactNode, actions?: React.ReactNode }) {
   return (
-    <div className="mb-3 rounded-xl overflow-hidden border border-[#00186E]/20 shadow-sm bg-white">
-      <div className="flex items-center justify-between px-4 py-2 bg-[#00186E]/5 border-b border-[#00186E]/10">
-        <div className="flex items-center gap-1.5 text-xs font-semibold text-[#00186E]/60 uppercase tracking-wider font-sans-brand">
+    <div className="mb-3 rounded-xl overflow-hidden border border-black/8 shadow-sm bg-white">
+      <div className="flex items-center justify-between px-4 py-2 bg-[#f5f4f1] border-b border-black/6">
+        <div className="flex items-center gap-1 text-[10px] font-semibold text-black/30 uppercase tracking-widest font-sans-brand">
           {icon}
           {title}
         </div>
@@ -744,22 +759,29 @@ function PreviewBlock({ title, icon, children, actions }: { title: string, icon:
 
 function CodeBlockPanel({ label, code }: { label: string, code: string }) {
   return (
-    <div className="mb-6 rounded-xl overflow-hidden border border-[#00186E]/20 shadow-sm">
-      <div className="bg-[#00186E]">
-        <div className="flex items-center justify-between px-4 py-2.5 border-b border-white/10">
-          <div className="flex items-center gap-1.5 text-xs font-medium text-white/60 uppercase tracking-wider font-sans-brand">
-            <Code className="w-3.5 h-3.5" />
+    <div className="mb-6 rounded-xl overflow-hidden shadow-[0_4px_24px_rgba(0,0,0,0.3)]" style={{ background: '#141924' }}>
+      {/* macOS-style titlebar */}
+      <div className="flex items-center justify-between px-4 py-2.5 border-b" style={{ borderColor: 'rgba(255,255,255,0.06)' }}>
+        <div className="flex items-center gap-3">
+          {/* Traffic lights — decorative */}
+          <div className="flex items-center gap-1.5">
+            <span className="w-3 h-3 rounded-full inline-block" style={{ background: '#FF5F57' }} />
+            <span className="w-3 h-3 rounded-full inline-block" style={{ background: '#FFBD2E' }} />
+            <span className="w-3 h-3 rounded-full inline-block" style={{ background: '#28C840' }} />
+          </div>
+          <div className="flex items-center gap-1.5 text-[10px] font-medium text-white/30 uppercase tracking-widest font-sans-brand">
+            <Code className="w-3 h-3" />
             {label}
           </div>
-          <CopyCodeButton code={code} />
         </div>
-        <div className="p-4 overflow-x-auto">
-          <pre className="!m-0 !p-0 !bg-transparent">
-            <code className="text-sm font-mono text-white/90 leading-relaxed whitespace-pre">
-              {code}
-            </code>
-          </pre>
-        </div>
+        <CopyCodeButton code={code} />
+      </div>
+      <div className="p-4 overflow-x-auto scrollbar-dark">
+        <pre className="!m-0 !p-0 !bg-transparent">
+          <code className="text-sm leading-relaxed whitespace-pre" style={{ color: '#a8c8f0', fontFamily: 'Consolas, "Cascadia Code", "Fira Code", "JetBrains Mono", monospace' }}>
+            {code}
+          </code>
+        </pre>
       </div>
     </div>
   );
@@ -871,21 +893,21 @@ function TikzRendererWithRef({ code, onImageReady }: { code: string, onImageRead
   }, [code]);
 
   return (
-    <div className="flex justify-center bg-white rounded-lg overflow-hidden min-h-[200px]">
+    <div className="flex justify-center bg-white rounded-lg overflow-hidden" style={{ minHeight: '200px' }}>
       {isRendering ? (
-        <div className="flex flex-col items-center justify-center w-full h-48 gap-3 text-[#00186E]/40">
+        <div className="flex flex-col items-center justify-center w-full h-48 gap-3">
           <Loader2 className="w-6 h-6 animate-spin text-[#FFAD1D]" />
           <div className="text-center">
-            <p className="text-sm font-sans-brand">Rendering figure…</p>
-            <p className="text-xs font-sans-brand mt-0.5 text-[#00186E]/30">This can take up to 30 seconds for complex figures.</p>
+            <p className="text-sm font-sans-brand text-black/40">Rendering figure…</p>
+            <p className="text-xs font-sans-brand mt-0.5 text-black/25">Complex figures can take up to 30 s</p>
           </div>
         </div>
       ) : pngDataUrl ? (
         <img src={pngDataUrl} alt="TikZ figure" className="max-w-full h-auto" />
       ) : (
-        <div className="flex flex-col items-center justify-center w-full min-h-[120px] p-4 gap-2 text-amber-600">
-          <AlertCircle className="w-5 h-5 shrink-0" />
-          <p className="text-sm font-sans-brand text-center">{renderError}</p>
+        <div className="flex flex-col items-center justify-center w-full min-h-[120px] p-4 gap-2">
+          <AlertCircle className="w-5 h-5 text-amber-500 shrink-0" />
+          <p className="text-sm font-sans-brand text-center text-amber-700">{renderError}</p>
         </div>
       )}
     </div>

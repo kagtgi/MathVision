@@ -1077,9 +1077,11 @@ export default function PdfToDocxConverter({ apiKey }: { apiKey: string }) {
 
   const fileName = pdfFile?.name?.replace(/\.pdf$/i, '') || 'document';
 
+  const rightPanelTitle = isProcessing ? 'Processing' : documentContent ? 'Summary' : 'How it works';
+
   return (
     <>
-      {/* ─── Fullscreen Document Viewer (Claude-style artifact) ─── */}
+      {/* ─── Fullscreen Document Viewer ─── */}
       {showViewer && documentContent && (
         <DocxViewer
           pages={documentContent}
@@ -1091,200 +1093,271 @@ export default function PdfToDocxConverter({ apiKey }: { apiKey: string }) {
         />
       )}
 
-      {/* ─── Main input UI ─── */}
-      <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="space-y-6">
-          {/* Upload Section */}
-          <div className="bg-white rounded-2xl shadow-sm border border-[#00186E]/10 overflow-hidden">
-            <div className="p-4 border-b border-[#00186E]/5 bg-[#00186E]/[0.02]">
-              <h2 className="font-medium text-[#00186E] flex items-center gap-2 font-sans-brand">
-                <FileText className="w-4 h-4 text-[#FFAD1D]" />
-                Input PDF
-              </h2>
-            </div>
+      {/* ─── Split workspace ─── */}
+      <div className="flex-1 flex overflow-hidden min-h-0">
 
-            <div className="p-4">
-              {!pdfFile ? (
-                <div
-                  {...getRootProps()}
-                  role="button"
-                  aria-label="Upload a PDF file"
-                  className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-colors duration-200 ${
-                    isDragActive
-                      ? 'border-[#FFAD1D] bg-[#FFAD1D]/10'
-                      : 'border-[#00186E]/20 hover:border-[#FFAD1D] hover:bg-[#FFAD1D]/5'
-                  }`}
-                >
-                  <input {...getInputProps()} />
-                  <Upload className="w-10 h-10 text-[#00186E]/30 mx-auto mb-4" />
-                  <p className="text-sm font-medium text-[#00186E]/70 mb-1 font-sans-brand">
-                    Drag & drop a PDF here
-                  </p>
-                  <p className="text-xs text-[#00186E]/40 font-sans-brand">
-                    or click to select a file (max 50MB)
-                  </p>
+        {/* ─── LEFT: dark input workspace ─── */}
+        <div className="w-[360px] xl:w-[400px] shrink-0 flex flex-col border-r border-[#1f2e45] overflow-hidden">
+          <div className="shrink-0 px-4 py-2.5 border-b border-[#1f2e45]">
+            <span className="text-[10px] font-semibold text-white/20 uppercase tracking-widest font-sans-brand">Source PDF</span>
+          </div>
+
+          <div className="flex-1 overflow-y-auto scrollbar-dark p-4">
+            {!pdfFile ? (
+              /* ── Drop zone ── */
+              <div
+                {...getRootProps()}
+                role="button"
+                aria-label="Upload a PDF file"
+                className={`relative rounded-xl overflow-hidden cursor-pointer transition-all duration-200 group ${
+                  isDragActive
+                    ? 'ring-2 ring-[#FFAD1D] ring-offset-2 ring-offset-[#0c1017]'
+                    : 'hover:ring-1 hover:ring-white/10'
+                }`}
+                style={{ minHeight: '300px' }}
+              >
+                <input {...getInputProps()} />
+                <div className="graph-bg absolute inset-0 rounded-xl" />
+                <div className="relative flex flex-col items-center justify-center py-14 text-center">
+                  {isDragActive ? (
+                    <>
+                      <div className="w-14 h-14 rounded-2xl bg-[#FFAD1D]/15 border border-[#FFAD1D]/30 flex items-center justify-center mb-3">
+                        <Upload className="w-6 h-6 text-[#FFAD1D]" />
+                      </div>
+                      <p className="text-sm font-medium text-[#FFAD1D] font-sans-brand">Release to upload</p>
+                    </>
+                  ) : (
+                    <>
+                      <div className="absolute inset-0 flex items-center justify-center pointer-events-none select-none overflow-hidden rounded-xl">
+                        <span className="text-[130px] font-serif-brand text-white/[0.032] leading-none -mt-4">∂</span>
+                      </div>
+                      <div className="w-10 h-10 rounded-xl bg-[#1a2438] border border-[#1f2e45] flex items-center justify-center mb-3 group-hover:border-[#FFAD1D]/30 group-hover:bg-[#FFAD1D]/8 transition-all">
+                        <Upload className="w-4 h-4 text-white/30 group-hover:text-[#FFAD1D]/60 transition-colors" />
+                      </div>
+                      <p className="text-sm font-medium text-white/50 mb-1 font-sans-brand group-hover:text-white/70 transition-colors">Drop PDF here</p>
+                      <p className="text-xs text-white/22 font-sans-brand">PDF — max 50 MB</p>
+                    </>
+                  )}
                 </div>
-              ) : (
-                <div className="space-y-4">
-                  {/* File info */}
-                  <div className="flex items-center gap-3 p-3 bg-[#00186E]/[0.03] rounded-xl border border-[#00186E]/10">
-                    <div className="w-10 h-10 bg-[#FFAD1D]/20 rounded-lg flex items-center justify-center">
-                      <FileText className="w-5 h-5 text-[#FFAD1D]" />
+              </div>
+            ) : (
+              /* ── File selected ── */
+              <div className="space-y-3">
+                {/* File chip */}
+                <div className="flex items-center gap-3 p-3 bg-[#1a2438] rounded-xl border border-[#1f2e45]">
+                  <div className="w-9 h-9 bg-[#FFAD1D]/15 rounded-lg flex items-center justify-center shrink-0">
+                    <FileText className="w-4 h-4 text-[#FFAD1D]" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-white/80 truncate font-sans-brand">{pdfFile.name}</p>
+                    <p className="text-xs text-white/30 font-sans-brand">{(pdfFile.size / 1024 / 1024).toFixed(2)} MB</p>
+                  </div>
+                  <button onClick={reset} className="text-white/25 hover:text-white/60 transition-colors" title="Remove file">
+                    <RotateCcw className="w-4 h-4" />
+                  </button>
+                </div>
+
+                {/* Error */}
+                {error && (
+                  <div className="bg-red-950/40 rounded-xl p-3.5 flex items-start gap-3 border border-red-900/30">
+                    <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-red-300 mb-0.5 font-sans-brand">Error</p>
+                      <p className="text-xs text-red-300/70 font-sans-brand">{error}</p>
                     </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-[#00186E] truncate font-sans-brand">
-                        {pdfFile.name}
-                      </p>
-                      <p className="text-xs text-[#00186E]/50 font-sans-brand">
-                        {(pdfFile.size / 1024 / 1024).toFixed(2)} MB
-                      </p>
-                    </div>
+                  </div>
+                )}
+
+                {/* Convert button */}
+                {!documentContent && !isProcessing && (
+                  <button
+                    onClick={processPdf}
+                    className="btn-gold w-full text-[#0c1017] font-semibold py-3 px-4 rounded-xl text-sm flex items-center justify-center gap-2 font-sans-brand"
+                  >
+                    Convert to DOCX
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
+                )}
+
+                {/* Cancel during processing */}
+                {isProcessing && (
+                  <button
+                    onClick={() => abortRef.current?.abort()}
+                    className="w-full text-[11px] text-white/30 hover:text-white/55 transition-colors border border-white/8 hover:border-white/15 rounded-lg py-2 font-sans-brand"
+                  >
+                    Cancel conversion
+                  </button>
+                )}
+
+                {/* Post-conversion actions */}
+                {documentContent && !isProcessing && (
+                  <div className="space-y-2">
+                    <button
+                      onClick={() => setShowViewer(true)}
+                      className="btn-gold w-full text-[#0c1017] font-semibold py-3 px-4 rounded-xl text-sm flex items-center justify-center gap-2 font-sans-brand"
+                    >
+                      <FileDown className="w-4 h-4" />
+                      View Document
+                    </button>
+                    <button
+                      onClick={downloadDocx}
+                      disabled={isGeneratingDocx}
+                      className="w-full flex items-center justify-center gap-1.5 text-[11px] font-medium text-white/35 hover:text-white/65 border border-white/8 hover:border-white/18 rounded-xl py-2.5 transition-all font-sans-brand disabled:opacity-40"
+                    >
+                      {isGeneratingDocx ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+                      {isGeneratingDocx ? 'Generating…' : 'Download DOCX'}
+                    </button>
                     <button
                       onClick={reset}
-                      className="text-xs text-[#00186E]/50 hover:text-[#00186E] transition-colors font-sans-brand"
-                      title="Remove file"
+                      className="w-full flex items-center justify-center gap-1.5 text-[11px] text-white/22 hover:text-white/45 transition-colors py-2 font-sans-brand"
                     >
-                      <RotateCcw className="w-4 h-4" />
+                      <RotateCcw className="w-3 h-3" />
+                      Convert another PDF
                     </button>
                   </div>
-
-                  {/* Progress */}
-                  {isProcessing && (
-                    <div className="space-y-3">
-                      <div className="flex items-center gap-2 text-sm text-[#00186E]/70 font-sans-brand">
-                        <Loader2 className="w-4 h-4 animate-spin text-[#FFAD1D] shrink-0" />
-                        {progress.status}
-                      </div>
-                      {progress.total > 0 && (
-                        <div className="w-full bg-[#00186E]/10 rounded-full h-2">
-                          <div
-                            className="bg-[#FFAD1D] h-2 rounded-full transition-all duration-500"
-                            style={{
-                              width: `${(progress.current / progress.total) * 100}%`,
-                            }}
-                          />
-                        </div>
-                      )}
-                      {/* Reasoning log — shows agent step-by-step thinking */}
-                      {reasoningLog.length > 0 && (
-                        <div className="bg-[#00186E]/[0.03] rounded-lg border border-[#00186E]/10 p-3 max-h-48 overflow-y-auto">
-                          <p className="text-[10px] font-semibold text-[#00186E]/40 uppercase tracking-wider mb-1.5 font-sans-brand">
-                            Agent reasoning
-                          </p>
-                          <div className="space-y-0.5">
-                            {reasoningLog.map((line, i) => (
-                              <p
-                                key={i}
-                                className={`text-xs font-sans-brand ${
-                                  line.startsWith('──')
-                                    ? 'text-[#00186E]/60 font-semibold mt-1'
-                                    : line.startsWith('  ')
-                                      ? 'text-[#00186E]/40 pl-2'
-                                      : 'text-[#00186E]/50'
-                                }`}
-                              >
-                                {line}
-                              </p>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Error */}
-                  {error && (
-                    <div className="bg-red-50 text-red-800 rounded-xl p-4 flex items-start gap-3 border border-red-100">
-                      <AlertCircle className="w-5 h-5 text-red-500 shrink-0 mt-0.5" />
-                      <div>
-                        <h3 className="font-medium mb-1 font-sans-brand">Error</h3>
-                        <p className="text-sm text-red-700/90">{error}</p>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Convert button */}
-                  {!documentContent && !isProcessing && (
-                    <button
-                      onClick={processPdf}
-                      disabled={isProcessing}
-                      className="w-full bg-[#FFAD1D] hover:bg-[#e89c10] text-[#00186E] font-semibold py-3 px-4 rounded-xl shadow-sm transition-colors disabled:opacity-70 disabled:cursor-not-allowed flex items-center justify-center gap-2 font-sans-brand"
-                    >
-                      <ChevronRight className="w-5 h-5" />
-                      Convert to DOCX
-                    </button>
-                  )}
-
-                  {/* Post-processing actions */}
-                  {documentContent && (
-                    <div className="space-y-3">
-                      {/* Open document viewer */}
-                      <button
-                        onClick={() => setShowViewer(true)}
-                        className="w-full bg-[#00186E] hover:bg-[#001050] text-white font-semibold py-3 px-4 rounded-xl shadow-sm transition-colors flex items-center justify-center gap-2 font-sans-brand"
-                      >
-                        <FileDown className="w-5 h-5" />
-                        View Document
-                      </button>
-
-                      {/* Download */}
-                      <button
-                        onClick={downloadDocx}
-                        disabled={isGeneratingDocx}
-                        className="w-full border-2 border-[#00186E] text-[#00186E] hover:bg-[#00186E]/5 font-semibold py-3 px-4 rounded-xl transition-colors disabled:opacity-70 disabled:cursor-not-allowed flex items-center justify-center gap-2 font-sans-brand"
-                      >
-                        {isGeneratingDocx ? (
-                          <>
-                            <Loader2 className="w-5 h-5 animate-spin" />
-                            Generating DOCX...
-                          </>
-                        ) : (
-                          <>
-                            <Download className="w-5 h-5" />
-                            Download DOCX
-                          </>
-                        )}
-                      </button>
-
-                      <button
-                        onClick={reset}
-                        className="w-full border border-[#00186E]/20 text-[#00186E]/70 hover:text-[#00186E] hover:border-[#00186E]/40 font-medium py-2.5 px-4 rounded-xl transition-colors flex items-center justify-center gap-2 font-sans-brand text-sm"
-                      >
-                        <RotateCcw className="w-4 h-4" />
-                        Convert Another PDF
-                      </button>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
+                )}
+              </div>
+            )}
           </div>
 
-          {/* Instructions */}
-          <div className="bg-[#B9CF7C]/20 rounded-2xl border border-[#B9CF7C]/40 p-5">
-            <h3 className="text-sm font-semibold text-[#00186E] mb-2 font-sans-brand">
-              How it works
-            </h3>
-            <ul className="text-sm text-[#00186E]/70 space-y-2 list-disc list-inside font-serif-brand">
-              <li>Upload a PDF file with text, equations, tables, and images.</li>
-              <li>
-                AI analyzes each page to detect structure and convert equations to{' '}
-                <strong>LaTeX</strong> with image-to-LaTeX quality.
-              </li>
-              <li>
-                Equations are rendered as high-fidelity images in{' '}
-                <code className="text-xs bg-[#00186E]/5 px-1 rounded">$...$</code> format and embedded in Word.
-              </li>
-              <li>
-                Tables are preserved as <strong>Word tables</strong> with LaTeX math or text in each cell.
-              </li>
-              <li>
-                Images are extracted, then generate <strong>TikZ code</strong>, compile to image,
-                and placed at correct positions.
-              </li>
-            </ul>
+          {/* Bottom hint */}
+          <div className="shrink-0 px-4 py-2.5 border-t border-[#1f2e45]">
+            <p className="text-[10px] text-white/18 font-sans-brand leading-relaxed">
+              PDF → Word &nbsp;·&nbsp; OMML equations &nbsp;·&nbsp; TikZ figures &nbsp;·&nbsp; MathType compatible
+            </p>
           </div>
         </div>
+
+        {/* ─── RIGHT: light output pane ─── */}
+        <div className="flex-1 flex flex-col bg-[#f8f7f4] overflow-hidden min-w-0">
+          <div className="shrink-0 px-4 py-2.5 border-b border-black/6 bg-white/50">
+            <span className="text-[10px] font-semibold text-black/25 uppercase tracking-widest font-sans-brand">{rightPanelTitle}</span>
+          </div>
+
+          <div className="flex-1 overflow-y-auto scrollbar-light p-5">
+            {isProcessing ? (
+              <div className="space-y-4">
+                {/* Progress status */}
+                <div className="flex items-center gap-2">
+                  <Loader2 className="w-4 h-4 animate-spin text-[#FFAD1D] shrink-0" />
+                  <p className="text-sm text-black/50 font-sans-brand">{progress.status}</p>
+                </div>
+                {progress.total > 0 && (
+                  <div className="w-full bg-black/8 rounded-full h-1.5 overflow-hidden">
+                    <div
+                      className="progress-shimmer h-full rounded-full transition-all duration-500"
+                      style={{ width: `${(progress.current / progress.total) * 100}%` }}
+                    />
+                  </div>
+                )}
+                {/* Agent log — terminal style */}
+                {reasoningLog.length > 0 && (
+                  <div className="rounded-xl overflow-hidden shadow-[0_4px_24px_rgba(0,0,0,0.15)]" style={{ background: '#141924' }}>
+                    <div className="flex items-center gap-3 px-4 py-2.5 border-b" style={{ borderColor: 'rgba(255,255,255,0.06)' }}>
+                      <div className="flex items-center gap-1.5">
+                        <span className="w-2.5 h-2.5 rounded-full inline-block" style={{ background: '#FF5F57' }} />
+                        <span className="w-2.5 h-2.5 rounded-full inline-block" style={{ background: '#FFBD2E' }} />
+                        <span className="w-2.5 h-2.5 rounded-full inline-block" style={{ background: '#28C840' }} />
+                      </div>
+                      <span className="text-[10px] text-white/30 uppercase tracking-widest font-sans-brand">Agent Log</span>
+                    </div>
+                    <div className="p-4 max-h-72 overflow-y-auto scrollbar-dark space-y-0.5">
+                      {reasoningLog.map((line, i) => (
+                        <p
+                          key={i}
+                          className={`text-[11px] leading-relaxed ${
+                            line.startsWith('──')
+                              ? 'text-[#FFAD1D]/60 font-semibold mt-2'
+                              : line.startsWith('  ')
+                                ? 'text-white/30 pl-2'
+                                : 'text-white/45'
+                          }`}
+                          style={{ fontFamily: 'Consolas, "Cascadia Code", "Fira Code", monospace' }}
+                        >
+                          {line}
+                        </p>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : documentContent ? (
+              /* ── Conversion summary ── */
+              <div className="space-y-4">
+                <div className="flex items-center gap-2 text-sm font-medium text-black/60 font-sans-brand">
+                  <CheckCircle2 className="w-4 h-4 text-[#B9CF7C]" />
+                  Converted {documentContent.length} page{documentContent.length !== 1 ? 's' : ''}
+                </div>
+                {/* Element type counts */}
+                {(() => {
+                  const counts: Record<string, number> = {};
+                  for (const page of documentContent) {
+                    for (const el of page.elements) {
+                      counts[el.type] = (counts[el.type] || 0) + 1;
+                    }
+                  }
+                  const labels: Record<string, string> = {
+                    heading: 'Headings',
+                    paragraph: 'Paragraphs',
+                    equation: 'Equations',
+                    table: 'Tables',
+                    image: 'Figures',
+                  };
+                  return (
+                    <div className="grid grid-cols-2 gap-2">
+                      {Object.entries(counts).map(([type, count]) => (
+                        <div key={type} className="bg-white rounded-xl border border-black/6 px-4 py-3">
+                          <p className="text-[10px] text-black/30 uppercase tracking-widest font-sans-brand mb-0.5">{labels[type] ?? type}</p>
+                          <p className="text-xl font-semibold text-black/70 font-serif-brand">{count}</p>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })()}
+                {/* Reasoning log (post-processing, collapsed) */}
+                {reasoningLog.length > 0 && (
+                  <details className="group">
+                    <summary className="text-[11px] text-black/35 hover:text-black/55 cursor-pointer font-sans-brand select-none">
+                      View agent log ({reasoningLog.length} lines)
+                    </summary>
+                    <div className="mt-2 rounded-xl overflow-hidden" style={{ background: '#141924' }}>
+                      <div className="p-3 max-h-56 overflow-y-auto scrollbar-dark space-y-0.5">
+                        {reasoningLog.map((line, i) => (
+                          <p
+                            key={i}
+                            className={`text-[10px] leading-relaxed ${
+                              line.startsWith('──') ? 'text-[#FFAD1D]/60 font-semibold mt-1.5' : 'text-white/35'
+                            }`}
+                            style={{ fontFamily: 'Consolas, monospace' }}
+                          >
+                            {line}
+                          </p>
+                        ))}
+                      </div>
+                    </div>
+                  </details>
+                )}
+              </div>
+            ) : (
+              /* ── How it works ── */
+              <div className="space-y-3">
+                {[
+                  { num: '1', text: 'Upload a PDF — text, equations, tables, figures all supported.' },
+                  { num: '2', text: 'AI reads each page with image-to-LaTeX precision, capturing every symbol and notation.' },
+                  { num: '3', text: 'Equations become OMML — editable in Word via MathType Toggle TeX.' },
+                  { num: '4', text: 'Figures run through a multi-agent TikZ pipeline and are compiled to crisp images.' },
+                  { num: '5', text: 'Download the .docx — open in Word and start editing immediately.' },
+                ].map(({ num, text }) => (
+                  <div key={num} className="flex gap-3">
+                    <span className="shrink-0 w-6 h-6 rounded-full bg-black/6 flex items-center justify-center text-[11px] font-semibold text-black/35 font-sans-brand">{num}</span>
+                    <p className="text-sm text-black/50 leading-relaxed font-sans-brand pt-0.5">{text}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
       </div>
     </>
   );

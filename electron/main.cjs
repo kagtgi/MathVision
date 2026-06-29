@@ -36,7 +36,28 @@ function createWindow() {
   });
 }
 
-app.whenReady().then(createWindow);
+app.whenReady().then(() => {
+  // Fix fetch() from file:// origin:
+  // Replace null/missing Origin so Google's API accepts the request,
+  // and add permissive CORS headers on responses so Chromium doesn't block them.
+  session.defaultSession.webRequest.onBeforeSendHeaders((details, callback) => {
+    const headers = { ...details.requestHeaders };
+    if (!headers['Origin'] || headers['Origin'] === 'null') {
+      headers['Origin'] = 'https://localhost';
+    }
+    callback({ requestHeaders: headers });
+  });
+
+  session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+    const headers = { ...details.responseHeaders };
+    headers['Access-Control-Allow-Origin'] = ['*'];
+    headers['Access-Control-Allow-Methods'] = ['GET, POST, PUT, DELETE, OPTIONS'];
+    headers['Access-Control-Allow-Headers'] = ['Content-Type, Authorization, x-goog-api-key, Accept'];
+    callback({ responseHeaders: headers });
+  });
+
+  createWindow();
+});
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();

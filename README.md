@@ -41,8 +41,9 @@ Chạy hoàn toàn trên máy bằng **Google Gemini** — chỉ cần nhập AP
 Các bước app tự làm:
 
 - **Đọc đề** từng trang, giữ nguyên công thức, bảng số liệu, phương án A–D.
-- **Cắt hình** trong đề ra khỏi trang PDF. Hình luôn có — nếu vẽ lại bằng TikZ không thành
-  công thì vẫn dùng ảnh cắt, không bao giờ để chỗ trống.
+- **Vẽ lại hình bằng TikZ cho nét.** Hình học, đồ thị, biểu đồ được dựng lại thay vì dùng
+  ảnh cắt lem nhem từ PDF; ảnh chụp vật thật thì giữ nguyên ảnh gốc. TikZ hỏng thì rơi về
+  ảnh cắt, không bao giờ để chỗ trống.
 - **Tự giải cả đề**: trắc nghiệm, đúng/sai, trả lời ngắn, tự luận. Giải hai lượt độc lập
   rồi đối chiếu; lệch nhau thì có lượt thứ ba phân xử và câu đó được đánh dấu để bạn soi lại.
 - **Tự vẽ hình** cho bài hình học không gian lớp 11 khi đề chưa có hình.

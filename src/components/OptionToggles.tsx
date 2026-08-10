@@ -9,7 +9,7 @@ export interface PipelineToggles {
   doubleCheck: boolean;
   /** Cho phép tự vẽ hình minh hoạ cho bài hình học. */
   drawFigures: boolean;
-  /** Vẽ lại hình có sẵn trong đề bằng TikZ (ảnh crop vẫn luôn được giữ làm nền). */
+  /** Ưu tiên dựng lại hình vẽ bằng TikZ; hỏng thì rơi về ảnh cắt từ đề. */
   redrawTikz: boolean;
 }
 
@@ -52,8 +52,8 @@ const ROWS: Array<{
   },
   {
     key: 'redrawTikz',
-    label: 'Vẽ lại hình trong đề bằng TikZ',
-    hint: 'Ảnh cắt từ PDF luôn được giữ; TikZ chỉ thay khi dựng thành công',
+    label: 'Ưu tiên vẽ lại hình bằng TikZ',
+    hint: 'Hình vẽ được dựng lại cho nét; ảnh chụp vật thật giữ nguyên ảnh gốc',
   },
 ];
 

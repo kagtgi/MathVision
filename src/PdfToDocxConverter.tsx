@@ -5,8 +5,9 @@
  * từ chính trang đó → ghép trang → chuẩn hoá → tự giải đề → tái cấu trúc → docx chuẩn.
  *
  * Hai nguyên tắc rút từ lần làm trước:
- *   - Hình LUÔN có ảnh crop từ PDF gốc. TikZ chỉ là bản nâng cấp, hỏng thì thôi,
- *     không bao giờ để chỗ trống.
+ *   - HÌNH VẼ (hình học, đồ thị, biểu đồ) ưu tiên dựng lại bằng TikZ cho nét; ảnh cắt
+ *     từ PDF là lưới an toàn khi TikZ hỏng, nên không bao giờ để chỗ trống. Chỉ ẢNH
+ *     CHỤP vật thật mới bắt buộc giữ ảnh gốc — vẽ lại là bịa nội dung.
  *   - Người dùng sửa được MMD trước khi tải, vì OCR và lời giải máy đều có thể sai.
  */
 
@@ -19,6 +20,7 @@ import OptionToggles, { type PipelineToggles } from './components/OptionToggles'
 import { type DocFormat } from './pipeline/formats';
 import { cropFigure, type FigureMap } from './pipeline/figures';
 import { ocrPage } from './pipeline/ocr';
+import type { FigureKind } from './pipeline/prompts';
 import { canvasToJpegBase64, extractPageText, loadPdf, renderPdfPage } from './pipeline/pdfRender';
 import { crossCheckPage } from './pipeline/textLayerCheck';
 import { recheck, runTextPipeline } from './pipeline/runPipeline';
@@ -130,7 +132,12 @@ export default function PdfToDocxConverter({ apiKey, models }: Props) {
       // cắt trang) — đây là thứ ghép trang không tự đoán được.
       const pageMmds: string[] = [];
       const allWarnings: string[] = [];
-      const figureJobs: Array<{ id: string; page: number; bbox: [number, number, number, number] }> = [];
+      const figureJobs: Array<{
+        id: string;
+        page: number;
+        bbox: [number, number, number, number];
+        kind: FigureKind;
+      }> = [];
       const textLayerIssues: QcIssue[] = [];
 
       for (let p = 1; p <= total; p++) {
@@ -152,7 +159,9 @@ export default function PdfToDocxConverter({ apiKey, models }: Props) {
         );
         pageMmds.push(res.mmd);
         allWarnings.push(...res.warnings);
-        for (const f of res.figures) figureJobs.push({ id: f.id, page: p, bbox: f.bbox });
+        for (const f of res.figures) {
+          figureJobs.push({ id: f.id, page: p, bbox: f.bbox, kind: f.kind });
+        }
 
         // Đối chiếu với lớp văn bản có sẵn trong PDF: gần như miễn phí, và là thứ duy
         // nhất bắt được câu bị bỏ sót hay số bị đổi — lỗi của mô hình đọc rất trôi chảy
@@ -167,7 +176,12 @@ export default function PdfToDocxConverter({ apiKey, models }: Props) {
         }
       }
 
-      // ── Cắt hình từ chính trang PDF: luôn có ảnh, không bao giờ để trống ──
+      // ── Hình: cắt trước làm lưới an toàn, rồi ưu tiên dựng lại bằng TikZ ──
+      //
+      // Ảnh cắt từ PDF luôn dính hạt và hay lem chữ bên cạnh, nên hình VẼ (hình học, đồ
+      // thị, biểu đồ) được dựng lại bằng TikZ cho nét; chỉ ẢNH CHỤP vật thật mới bắt buộc
+      // giữ ảnh gốc, vì vẽ lại là bịa nội dung. Cắt vẫn chạy trước để nếu TikZ hỏng thì
+      // vẫn còn hình, không bao giờ để chỗ trống.
       setStage('Đang cắt hình từ trang gốc…');
       const map: FigureMap = new Map();
       for (const job of figureJobs) {
@@ -179,6 +193,22 @@ export default function PdfToDocxConverter({ apiKey, models }: Props) {
       }
       figuresRef.current = map;
       setFigures(new Map(map));
+
+      if (toggles.redrawTikz) {
+        const drawable = figureJobs.filter((j) => j.kind === 've' && map.has(j.id));
+        const skipped = figureJobs.length - drawable.length;
+        for (const [i, job] of drawable.entries()) {
+          if (controller.signal.aborted) return;
+          setStage(`Đang vẽ lại hình ${i + 1}/${drawable.length} bằng TikZ…`);
+          setProgress({ done: i + 1, total: drawable.length });
+          const ok = await redrawOne(job.id, map.get(job.id)!, controller);
+          if (!ok) allWarnings.push(`Hình ${job.id}: dựng TikZ không đạt — dùng ảnh cắt từ đề.`);
+        }
+        if (skipped) {
+          allWarnings.push(`${skipped} hình là ảnh chụp vật thật — giữ nguyên ảnh gốc.`);
+        }
+        setFigures(new Map(figuresRef.current));
+      }
 
       // ── Chặng văn bản: chuẩn hoá → tự giải → tái cấu trúc → QC ──
       setStage(toggles.autoSolve ? 'Đang giải đề…' : 'Đang chuẩn hoá nội dung…');
@@ -218,12 +248,6 @@ export default function PdfToDocxConverter({ apiKey, models }: Props) {
       setDisagreements(result.disagreements);
       setStage('');
       setProgress(null);
-
-      // ── Vẽ lại hình trong đề bằng TikZ: chạy SAU cùng, ảnh crop vẫn đang dùng nên
-      // thất bại cũng không mất gì. Chỉ thay khi dựng được ảnh mới.
-      if (toggles.redrawTikz && map.size) {
-        void redrawFigures(map, controller);
-      }
     } catch (err) {
       if (!controller.signal.aborted) {
         setError(err instanceof Error ? err.message : 'Lỗi không xác định.');
@@ -234,36 +258,33 @@ export default function PdfToDocxConverter({ apiKey, models }: Props) {
   };
 
   /**
-   * Thử vẽ lại từng hình của đề bằng TikZ. Ảnh crop từ PDF vẫn đang được dùng, nên đây
-   * thuần là nâng cấp: dựng được thì thay, không thì im lặng giữ nguyên ảnh cắt.
+   * Dựng lại MỘT hình bằng TikZ, thay vào chỗ ảnh cắt nếu thành công.
+   *
+   * Trả `false` khi không dựng được — lúc đó ảnh cắt vẫn nguyên trong figureMap nên tài
+   * liệu không bao giờ thiếu hình. Hỏng một hình không được làm hỏng cả tài liệu, nên
+   * mọi lỗi đều nuốt tại đây.
    */
-  const redrawFigures = async (map: FigureMap, controller: AbortController) => {
-    const ids = [...map.keys()].filter((id) => map.get(id)!.source === 'crop');
-    let replaced = 0;
-    for (const [i, id] of ids.entries()) {
-      if (controller.signal.aborted) return;
-      const fig = map.get(id)!;
-      setStage(`Đang vẽ lại hình ${i + 1}/${ids.length} bằng TikZ…`);
-      try {
-        const gen = await generateTikzMultiAgent(apiKey, bytesToBase64(fig.bytes), 'image/png');
-        if (!gen.tikzCode.includes('\\begin{tikzpicture}')) continue;
-        const png = await tikzToImage(gen.tikzCode);
-        if (!png) continue;
-        figuresRef.current.set(id, {
-          bytes: png.bytes,
-          w: png.width,
-          h: png.height,
-          source: 'tikz',
-        });
-        setFigures(new Map(figuresRef.current));
-        replaced++;
-      } catch {
-        // Hỏng một hình không được làm hỏng cả tài liệu.
-      }
-    }
-    setStage('');
-    if (replaced) {
-      setNotes((prev) => [...prev, `Đã vẽ lại ${replaced}/${ids.length} hình bằng TikZ.`]);
+  const redrawOne = async (
+    id: string,
+    fig: { bytes: Uint8Array },
+    controller: AbortController,
+  ): Promise<boolean> => {
+    try {
+      const gen = await generateTikzMultiAgent(apiKey, bytesToBase64(fig.bytes), 'image/png');
+      if (controller.signal.aborted) return false;
+      if (!gen.tikzCode.includes('\\begin{tikzpicture}')) return false;
+      const png = await tikzToImage(gen.tikzCode);
+      if (!png) return false;
+      figuresRef.current.set(id, {
+        bytes: png.bytes,
+        w: png.width,
+        h: png.height,
+        source: 'tikz',
+      });
+      setFigures(new Map(figuresRef.current));
+      return true;
+    } catch {
+      return false;
     }
   };
 

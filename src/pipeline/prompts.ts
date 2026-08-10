@@ -37,7 +37,7 @@ D. 40.
 
 Câu 3. Cho hình chóp $S.ABCD$ có đáy $ABCD$ là hình vuông cạnh $a$, $SA \perp (ABCD)$ và $SA = a\sqrt{3}$.
 
-![](#p1_f1){bbox=58.4,22.7,34.0,26.5}
+![](#p1_f1){bbox=58.4,22.7,34.0,26.5,kind=ve}
 
 Góc giữa $SC$ và mặt phẳng $(ABCD)$ bằng
 A. $30^{\circ}$.
@@ -87,16 +87,27 @@ BỎ HẲN, KHÔNG CHÉP LẠI
 HÌNH VẼ
 Hình học, đồ thị hàm số, biểu đồ, ảnh thực tế (KHÔNG tính logo trường, hoa văn trang
 trí) — xuất ĐÚNG MỘT DÒNG tại đúng vị trí trong mạch đọc:
-  ![](#p{PAGE}_f{K}){bbox=x,y,w,h}
+  ![](#p{PAGE}_f{K}){bbox=x,y,w,h,kind=<loại>}
 với x,y là góc trên trái, w,h là kích thước, tất cả tính theo PHẦN TRĂM của ảnh trang
 này (một chữ số thập phân); K đánh số 1,2,3... theo thứ tự đọc trong trang.
+
+<loại> chỉ nhận một trong hai giá trị:
+  ve   — hình VẼ bằng nét: hình học phẳng/không gian, đồ thị hàm số, trục số, bảng biến
+         thiên, biểu đồ cột/tròn/đường, sơ đồ. Đây là mặc định khi phân vân.
+  anh  — ẢNH CHỤP vật thật: ảnh chụp đồ vật, công trình, người, bản đồ ảnh, ảnh màn hình.
+
+BBOX PHẢI ÔM SÁT hình: chỉ gồm nét vẽ và nhãn TRÊN hình (tên điểm, số trên trục). TUYỆT
+ĐỐI không trùm sang chữ của đề, phương án A-D, hay số câu ở trên/dưới hình. Thà cắt hơi
+chật còn hơn dính chữ bên cạnh.
+
 Không mô tả hình bằng lời, không bỏ trống dòng này.`;
 
 const SELF_CHECK = String.raw`TỰ KIỂM TRA trước khi xuất (sửa ngay nếu sai):
 □ Số dấu $ trên mỗi dòng là số chẵn.
 □ Không còn $$, \[ \], \( \) ở bất cứ đâu.
 □ Mỗi bảng đều có dòng phân cách | :--- | ngay sau hàng đầu.
-□ Mỗi hình đều có đủ bbox bốn số.
+□ Mỗi hình đều có đủ bbox bốn số và kind=ve hoặc kind=anh.
+□ Bbox của hình không trùm sang chữ của đề hay phương án bên cạnh.
 □ Không có chữ tiếng Việt nằm bên trong $...$.
 □ Không thêm bất cứ thứ gì không có trên trang.`;
 
@@ -154,10 +165,20 @@ export function continuationPrompt(soFar: string): string {
 
 // ─── Bóc hình + bbox ─────────────────────────────────────────────────────────
 
+export type FigureKind = 've' | 'anh';
+
 export interface FigureRef {
   id: string;
   /** [x, y, w, h] theo phần trăm ảnh trang. */
   bbox: [number, number, number, number];
+  /**
+   * `ve` = hình vẽ bằng nét (hình học, đồ thị, biểu đồ) — nên dựng lại bằng TikZ cho nét.
+   * `anh` = ảnh chụp vật thật — phải giữ ảnh cắt, vẽ lại là sai nội dung.
+   *
+   * Thiếu thuộc tính thì coi là `ve`: đề thi toán hầu như chỉ có hình vẽ, và ưu tiên
+   * TikZ là mặc định người dùng muốn.
+   */
+  kind: FigureKind;
 }
 
 /**
@@ -165,7 +186,16 @@ export interface FigureRef {
  * `bbox=` hoặc `bbox:`, và thuộc tính lạ đứng cạnh trong cùng cặp ngoặc nhọn.
  */
 const FIG_LINE =
-  /!\[[^\]]*\]\(\s*#?([\w-]+)\s*\)\s*\{[^}]*bbox\s*[:=]\s*([\d.]+)\s*[,;]\s*([\d.]+)\s*[,;]\s*([\d.]+)\s*[,;]\s*([\d.]+)[^}]*\}/g;
+  /!\[[^\]]*\]\(\s*#?([\w-]+)\s*\)\s*\{([^}]*bbox\s*[:=]\s*([\d.]+)\s*[,;]\s*([\d.]+)\s*[,;]\s*([\d.]+)\s*[,;]\s*([\d.]+)[^}]*)\}/g;
+
+/**
+ * Đọc loại hình từ chuỗi thuộc tính. CHỈ khi model nói rõ là ảnh chụp mới trả `anh`;
+ * mọi trường hợp khác (kể cả thiếu thuộc tính) đều là hình vẽ, vì đề toán gần như chỉ
+ * có hình vẽ và người dùng muốn ưu tiên dựng lại bằng TikZ.
+ */
+function kindOf(attrs: string): FigureKind {
+  return /\b(?:kind|loai|loại)\s*[:=]\s*(?:anh|ảnh|photo|image)\b/i.test(attrs) ? 'anh' : 've';
+}
 
 const FIG_LINE_NO_BBOX = /^\s*!\[[^\]]*\]\(\s*#[\w-]+\s*\)\s*$/;
 
@@ -183,13 +213,17 @@ export function extractFigures(mmd: string): {
   const figures: FigureRef[] = [];
   const warnings: string[] = [];
 
-  let text = mmd.replace(FIG_LINE, (_m, id: string, x: string, y: string, w: string, h: string) => {
-    figures.push({
-      id,
-      bbox: [parseFloat(x), parseFloat(y), parseFloat(w), parseFloat(h)],
-    });
-    return `![](#${id})`;
-  });
+  let text = mmd.replace(
+    FIG_LINE,
+    (_m, id: string, attrs: string, x: string, y: string, w: string, h: string) => {
+      figures.push({
+        id,
+        bbox: [parseFloat(x), parseFloat(y), parseFloat(w), parseFloat(h)],
+        kind: kindOf(attrs),
+      });
+      return `![](#${id})`;
+    },
+  );
 
   // Dự phòng: khối JSON đuôi liệt kê hình
   const jsonTail = text.match(/```json\s*(\{[\s\S]*?"figures"[\s\S]*?\})\s*```/);
@@ -201,7 +235,7 @@ export function extractFigures(mmd: string): {
         const b = f.bbox;
         if (!id || !Array.isArray(b) || b.length !== 4) continue;
         if (figures.some((x) => x.id === id)) continue;
-        figures.push({ id, bbox: [b[0], b[1], b[2], b[3]] });
+        figures.push({ id, bbox: [b[0], b[1], b[2], b[3]], kind: 've' });
       }
       text = text.replace(jsonTail[0], '').trimEnd();
     } catch {

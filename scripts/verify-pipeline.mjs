@@ -286,7 +286,23 @@ const UNIT_TESTS = [
   {
     name: 'figures: bbox nhiều định dạng phân cách',
     run: () => extractFigures('![](#p2_f1){bbox=1.0; 2.0 , 30.0,40.0}').figures,
-    expect: [{ id: 'p2_f1', bbox: [1, 2, 30, 40] }],
+    expect: [{ id: 'p2_f1', bbox: [1, 2, 30, 40], kind: 've' }],
+  },
+  // Loại hình quyết định có dựng lại bằng TikZ hay không, nên phải đọc đúng.
+  {
+    name: 'figures: kind=anh -> ảnh chụp, giữ ảnh gốc',
+    run: () => extractFigures('![](#p1_f1){bbox=1,2,30,40,kind=anh}').figures,
+    expect: [{ id: 'p1_f1', bbox: [1, 2, 30, 40], kind: 'anh' }],
+  },
+  {
+    name: 'figures: kind=ve -> hình vẽ',
+    run: () => extractFigures('![](#p1_f1){bbox=1,2,30,40,kind=ve}').figures,
+    expect: [{ id: 'p1_f1', bbox: [1, 2, 30, 40], kind: 've' }],
+  },
+  {
+    name: 'figures: thiếu kind -> mặc định hình vẽ (ưu tiên TikZ)',
+    run: () => extractFigures('![](#p1_f1){bbox=1,2,30,40}').figures,
+    expect: [{ id: 'p1_f1', bbox: [1, 2, 30, 40], kind: 've' }],
   },
   {
     name: 'figures: hình thiếu bbox bị bỏ dòng kèm cảnh báo',

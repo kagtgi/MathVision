@@ -124,7 +124,21 @@ export default function MmdWorkbench({
 
   const stem = fileName.replace(/\.(pdf|png|jpe?g|webp)$/i, '');
 
-  const saveBlob = (blob: Blob, name: string) => {
+  /**
+   * Lưu file. Trong bản đóng gói đi qua cầu nối `window.mathvision` để tiến trình main
+   * hỏi chỗ lưu rồi ghi thẳng ra đĩa — cơ chế tải của trình duyệt không dùng được ở đó
+   * (mở hộp thoại trong `will-download` làm treo main, file kẹt lại dạng .tmp).
+   * Chạy trong trình duyệt lúc phát triển thì rơi về thẻ `<a download>` như thường.
+   */
+  const saveBlob = async (blob: Blob, name: string) => {
+    const bridge = window.mathvision;
+    if (bridge?.saveFile) {
+      const res = await bridge.saveFile(name, new Uint8Array(await blob.arrayBuffer()));
+      if (!res.ok && !res.canceled) {
+        window.alert(`Không lưu được file: ${res.error ?? 'lỗi không rõ'}`);
+      }
+      return;
+    }
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -146,15 +160,15 @@ export default function MmdWorkbench({
     try {
       const resolver = makeFigureResolver(figures);
       const doc = format === 'vdc' ? buildVdcDocx(mmd, resolver) : buildExamDocx(mmd, resolver);
-      saveBlob(await Packer.toBlob(doc), `${stem}.docx`);
+      await saveBlob(await Packer.toBlob(doc), `${stem}.docx`);
     } finally {
       setDownloading(false);
     }
   };
 
   /** Bản .txt theo skill của nhóm VDC — chỉ có ở định dạng VDC. */
-  const downloadTxt = () => {
-    saveBlob(new Blob([mmdToVdcTxt(mmd)], { type: 'text/plain;charset=utf-8' }), `${stem}.txt`);
+  const downloadTxt = async () => {
+    await saveBlob(new Blob([mmdToVdcTxt(mmd)], { type: 'text/plain;charset=utf-8' }), `${stem}.txt`);
   };
 
   const tabButton = (id: Tab, label: string, Icon: typeof Eye, badge?: number) => (
@@ -203,7 +217,7 @@ export default function MmdWorkbench({
 
           {format === 'vdc' && (
             <button
-              onClick={downloadTxt}
+              onClick={() => void downloadTxt()}
               disabled={busy || !mmd.trim()}
               className="btn btn-outline btn-sm"
               title="Bản .txt theo quy ước nhập liệu của nhóm"
@@ -214,7 +228,7 @@ export default function MmdWorkbench({
           )}
 
           <button
-            onClick={download}
+            onClick={() => void download()}
             disabled={downloading || busy || !mmd.trim()}
             className="btn btn-primary btn-sm"
           >

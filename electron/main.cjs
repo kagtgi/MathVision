@@ -1,64 +1,75 @@
 'use strict';
 
-const { app, BrowserWindow, dialog, shell, session } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain, shell, session } = require('electron');
 const fs = require('fs');
 const path = require('path');
 
+/** Thư mục lưu lần trước — giáo viên thường lưu cả loạt đề vào cùng một chỗ. */
+let lastSaveDir = null;
+
 /**
- * Mỗi lần tải là hiện hộp thoại cho người dùng tự chọn thư mục, và nhớ thư mục vừa chọn
- * làm mặc định cho lần sau — giáo viên thường lưu cả loạt đề vào cùng một chỗ.
+ * Lưu file theo yêu cầu của giao diện: hỏi chỗ lưu, ghi ra đĩa, mở thư mục.
  *
- * Xong thì mở Explorer chỉ đúng file vừa lưu, để không phải đi tìm.
+ * KHÔNG dùng cơ chế tải của trình duyệt (blob + thẻ `<a download>`). Đã thử hai cách và
+ * cả hai đều hỏng ngoài đời thật:
+ *   1. `item.setSaveDialogOptions()` rồi để Electron tự bung hộp thoại — hộp thoại không
+ *      hiện, không file nào được ghi.
+ *   2. Tự gọi `dialog.showSaveDialogSync()` bên trong `will-download` — treo tiến trình
+ *      main, download nằm lại dạng `.tmp` trong Downloads và không bao giờ hoàn tất.
+ * Nguyên nhân chung: `will-download` bắt buộc quyết đường dẫn NGAY, không cho mở hộp
+ * thoại modal ở đó. Đi qua IPC thì không vướng ràng buộc nào.
+ */
+function setupFileSaving() {
+  ipcMain.handle('mv:save-file', async (event, suggestedName, data) => {
+    try {
+      const bytes = Buffer.from(data);
+      const name = String(suggestedName || 'tai-lieu.docx');
+      const ext = path.extname(name).toLowerCase();
+
+      // Lối tắt CHỈ dành cho kiểm thử tự động (scripts/verify-download.mjs): bỏ qua hộp
+      // thoại để chạy được không cần người bấm. Không đặt biến này thì không có tác dụng.
+      const testDir = process.env.MV_TEST_SAVE_DIR;
+      let target;
+      if (testDir) {
+        target = path.join(testDir, name);
+      } else {
+        const dir = lastSaveDir && fs.existsSync(lastSaveDir) ? lastSaveDir : app.getPath('downloads');
+        const filters =
+          ext === '.txt'
+            ? [{ name: 'Văn bản', extensions: ['txt'] }]
+            : [{ name: 'Tài liệu Word', extensions: ['docx'] }];
+        const win = BrowserWindow.fromWebContents(event.sender);
+        const result = await dialog.showSaveDialog(win ?? undefined, {
+          title: 'Lưu file',
+          defaultPath: path.join(dir, name),
+          filters: [...filters, { name: 'Tất cả', extensions: ['*'] }],
+          buttonLabel: 'Lưu',
+        });
+        if (result.canceled || !result.filePath) return { ok: false, canceled: true };
+        target = result.filePath;
+      }
+
+      await fs.promises.writeFile(target, bytes);
+      lastSaveDir = path.dirname(target);
+      shell.showItemInFolder(target);
+      return { ok: true, path: target };
+    } catch (err) {
+      return { ok: false, error: err && err.message ? err.message : String(err) };
+    }
+  });
+}
+
+/**
+ * Lưới an toàn cho mọi tải file đi đường trình duyệt (giao diện lẽ ra không dùng nữa).
+ * Đặt đường dẫn NGAY, tuyệt đối không mở hộp thoại ở đây.
  */
 function setupDownloads() {
-  let lastDir = null;
-
-  session.defaultSession.on('will-download', (_event, item, webContents) => {
-    const name = item.getFilename();
-    const ext = path.extname(name).toLowerCase();
-    const dir = lastDir && fs.existsSync(lastDir) ? lastDir : app.getPath('downloads');
-
-    const filters =
-      ext === '.txt'
-        ? [{ name: 'Văn bản', extensions: ['txt'] }]
-        : [{ name: 'Tài liệu Word', extensions: ['docx'] }];
-
-    // TỰ gọi hộp thoại rồi TỰ đặt đường dẫn.
-    //
-    // Cách gọn hơn là chỉ khai `item.setSaveDialogOptions(...)` và để Electron tự bung
-    // hộp thoại, nhưng thực tế bấm Tải thì KHÔNG có gì hiện ra và cũng không có file nào
-    // được ghi. Bản đồng bộ này chắc chắn chạy: hộp thoại hiện ngay, huỷ thì huỷ tải,
-    // chọn xong thì ghi đúng chỗ đã chọn.
-    let target = null;
-    try {
-      const win = webContents ? BrowserWindow.fromWebContents(webContents) : null;
-      const options = {
-        title: 'Lưu file',
-        defaultPath: path.join(dir, name),
-        filters: [...filters, { name: 'Tất cả', extensions: ['*'] }],
-        buttonLabel: 'Lưu',
-      };
-      target = win ? dialog.showSaveDialogSync(win, options) : dialog.showSaveDialogSync(options);
-    } catch {
-      target = null;
-    }
-
-    if (target === undefined || target === null) {
-      // Người dùng bấm Huỷ, hoặc hộp thoại không mở được. Trường hợp sau mà bỏ luôn thì
-      // coi như mất file, nên lưu tạm vào Downloads còn hơn không có gì.
-      if (target === undefined) {
-        item.cancel();
-        return;
-      }
-      target = path.join(app.getPath('downloads'), name);
-    }
-
+  session.defaultSession.on('will-download', (_event, item) => {
+    const dir = lastSaveDir && fs.existsSync(lastSaveDir) ? lastSaveDir : app.getPath('downloads');
+    const target = path.join(dir, item.getFilename());
     item.setSavePath(target);
-    const saved = target;
     item.once('done', (_e, state) => {
-      if (state !== 'completed') return;
-      lastDir = path.dirname(saved);
-      shell.showItemInFolder(saved);
+      if (state === 'completed') shell.showItemInFolder(target);
     });
   });
 }
@@ -73,6 +84,7 @@ function createWindow() {
       nodeIntegration: false,
       contextIsolation: true,
       webSecurity: false, // allow fetch() to external APIs from file:// origin
+      preload: path.join(__dirname, 'preload.cjs'),
     },
     title: 'MathVision',
     show: false,
@@ -116,6 +128,7 @@ app.whenReady().then(() => {
     callback({ responseHeaders: headers });
   });
 
+  setupFileSaving();
   setupDownloads();
   createWindow();
 });

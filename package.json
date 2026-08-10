@@ -54,7 +54,7 @@
     },
     "files": [
       "dist/**/*",
-      "electron/main.cjs",
+      "electron/**/*",
       "package.json",
       "!node_modules/**"
     ],

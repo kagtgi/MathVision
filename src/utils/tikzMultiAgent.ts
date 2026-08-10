@@ -11,8 +11,14 @@
  * only Draft B + Verify are needed — saving one full API round-trip.
  */
 
-import { GoogleGenAI } from '@google/genai';
-import { GEMINI_MODEL, TIKZJAX_COMPAT_RULES, TEMP_PRECISE, TEMP_STANDARD, TEMP_CREATIVE } from './sharedPrompts';
+import { TIKZJAX_COMPAT_RULES } from './sharedPrompts';
+import {
+  callGemini,
+  TEMP_CREATIVE,
+  TEMP_PRECISE,
+  TEMP_STANDARD,
+  type GeminiPart,
+} from '../pipeline/geminiClient';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -152,16 +158,12 @@ function extractReasoning(text: string): string {
   return '';
 }
 
-function callModel(
-  ai: GoogleGenAI,
-  parts: Array<{ text: string } | { inlineData: { data: string; mimeType: string } }>,
-  temperature: number,
-) {
-  return ai.models.generateContent({
-    model: GEMINI_MODEL,
-    contents: [{ role: 'user', parts }],
-    config: { temperature },
-  });
+/**
+ * Đi qua wrapper chung: có chuỗi model dự phòng, backoff theo retryDelay của Google,
+ * và huỷ thật khi người dùng bấm dừng.
+ */
+function callModel(apiKey: string, parts: GeminiPart[], temperature: number) {
+  return callGemini(apiKey, { parts, temperature, label: 'tikz' });
 }
 
 // ─── Pipeline ────────────────────────────────────────────────────────────────
@@ -179,7 +181,6 @@ export async function generateTikzMultiAgent(
   options?: { onProgress?: TikzProgressCallback; draftA?: string },
 ): Promise<TikzGenerationResult> {
   const { onProgress, draftA } = options ?? {};
-  const ai = new GoogleGenAI({ apiKey });
   const img = { inlineData: { data: imageBase64, mimeType } };
   const log: string[] = [];
   const candidates: string[] = [];
@@ -196,7 +197,7 @@ export async function generateTikzMultiAgent(
 
     try {
       const respB = await withTimeout(
-        callModel(ai, [{ text: DRAFT_B_PROMPT }, img], TEMP_CREATIVE),
+        callModel(apiKey, [{ text: DRAFT_B_PROMPT }, img], TEMP_CREATIVE),
         AGENT_TIMEOUT_MS,
         'DraftB',
       );
@@ -215,12 +216,12 @@ export async function generateTikzMultiAgent(
     log.push('Step 1: Running two independent drafts in parallel...');
 
     const callA = withTimeout(
-      callModel(ai, [{ text: DRAFT_B_PROMPT }, img], TEMP_STANDARD),
+      callModel(apiKey, [{ text: DRAFT_B_PROMPT }, img], TEMP_STANDARD),
       AGENT_TIMEOUT_MS,
       'DraftA',
     );
     const callB = withTimeout(
-      callModel(ai, [{ text: DRAFT_B_PROMPT }, img], TEMP_CREATIVE),
+      callModel(apiKey, [{ text: DRAFT_B_PROMPT }, img], TEMP_CREATIVE),
       AGENT_TIMEOUT_MS,
       'DraftB',
     );
@@ -271,7 +272,7 @@ export async function generateTikzMultiAgent(
 
   const verifyResponse = await withTimeout(
     callModel(
-      ai,
+      apiKey,
       [
         { text: VERIFY_FIX_PROMPT },
         img,
@@ -318,35 +319,4 @@ export async function generateTikzMultiAgent(
     reasoning,
     log,
   };
-}
-
-/**
- * Single-agent fallback — one direct generation pass.
- */
-export async function generateTikzSingleAgent(
-  apiKey: string,
-  imageBase64: string,
-  mimeType: string,
-): Promise<string | null> {
-  const ai = new GoogleGenAI({ apiKey });
-
-  try {
-    const resp = await withTimeout(
-      callModel(
-        ai,
-        [
-          { text: DRAFT_B_PROMPT },
-          { inlineData: { data: imageBase64, mimeType } },
-          { text: 'Look at this image and write complete, compilable TikZ code that reproduces it. Output ONLY the TikZ code.' },
-        ],
-        0.2,
-      ),
-      AGENT_TIMEOUT_MS,
-      'Single Generator',
-    );
-    const code = extractTikzCode(resp.text || '');
-    return code.includes('\\begin{tikzpicture}') ? code : null;
-  } catch {
-    return null;
-  }
 }

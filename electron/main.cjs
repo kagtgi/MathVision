@@ -1,7 +1,35 @@
 'use strict';
 
 const { app, BrowserWindow, shell, session } = require('electron');
+const fs = require('fs');
 const path = require('path');
+
+/**
+ * File tải về luôn vào thư mục Downloads, rồi tự mở Explorer chỉ đúng file đó.
+ *
+ * Mặc định của Electron là bung hộp thoại "Save As" mỗi lần tải — với người dùng là giáo
+ * viên thì vừa thêm một bước, vừa hay bị bấm nhầm rồi không biết file nằm đâu. Cách này
+ * bỏ hẳn hộp thoại và trả lời luôn câu "file vừa tải nằm ở đâu".
+ */
+function setupDownloads() {
+  session.defaultSession.on('will-download', (_event, item) => {
+    const dir = app.getPath('downloads');
+    const name = item.getFilename();
+    const ext = path.extname(name);
+    const base = path.basename(name, ext);
+
+    // Trùng tên thì thêm (1), (2)... giống Chrome, không ghi đè file cũ.
+    let target = path.join(dir, name);
+    for (let i = 1; fs.existsSync(target); i++) {
+      target = path.join(dir, `${base} (${i})${ext}`);
+    }
+    item.setSavePath(target);
+
+    item.once('done', (_e, state) => {
+      if (state === 'completed') shell.showItemInFolder(target);
+    });
+  });
+}
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -56,6 +84,7 @@ app.whenReady().then(() => {
     callback({ responseHeaders: headers });
   });
 
+  setupDownloads();
   createWindow();
 });
 

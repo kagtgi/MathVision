@@ -1,15 +1,60 @@
 @import "tailwindcss";
 
+/*
+ * Hệ thiết kế: tối giản kiểu tài liệu nghiên cứu của Google.
+ *
+ * Nguyên tắc: nền trắng, đường kẻ mảnh thay cho đổ bóng, khoảng trắng rộng, đúng MỘT
+ * màu nhấn, chữ nghĩa là thứ chính. Không gradient, không glow, không viền bo tròn to.
+ *
+ * Chỉ dùng Google Sans (bản variable đã cắt còn Latin + dấu tiếng Việt, 110 KB).
+ */
+
+@font-face {
+  font-family: "Google Sans";
+  src: url("/fonts/GoogleSans.woff2") format("woff2-variations");
+  font-weight: 300 800;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Google Sans";
+  src: url("/fonts/GoogleSans-Italic.woff2") format("woff2-variations");
+  font-weight: 300 800;
+  font-style: italic;
+  font-display: swap;
+}
+
 @theme {
-  --font-serif-brand: "EB Garamond", "Garamond Premier Pro", "Cormorant Garamond", Garamond, "Times New Roman", serif;
-  --font-sans-brand: "Segoe UI", "Inter", "Helvetica Neue", Arial, sans-serif;
-  --color-resolution-blue: #00186E;
-  --color-my-sin: #FFAD1D;
-  --color-wild-willow: #B9CF7C;
+  --font-sans: "Google Sans", system-ui, sans-serif;
+  --font-mono: "Google Sans", ui-monospace, monospace;
+}
+
+:root {
+  /* Thang xám của Google Material */
+  --ink: #1f1f1f;
+  --ink-2: #444746;
+  --ink-3: #747775;
+  --ink-4: #9aa0a6;
+  --line: #e3e3e3;
+  --line-strong: #c7c7c7;
+  --surface: #ffffff;
+  --surface-2: #f8f9fa;
+  --surface-3: #f1f3f4;
+
+  /* Một màu nhấn duy nhất */
+  --accent: #0b57d0;
+  --accent-hover: #0842a0;
+  --accent-soft: #e8f0fe;
+
+  --ok: #146c2e;
+  --warn: #8f5100;
+  --err: #b3261e;
 }
 
 @layer base {
-  html, body {
+  html,
+  body {
     height: 100%;
     overflow: hidden;
   }
@@ -21,83 +66,311 @@
   }
 
   body {
-    font-family: var(--font-sans-brand);
+    font-family: var(--font-sans);
+    font-size: 14px;
+    line-height: 1.55;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
-    background: #0c1017;
-    color: #c8d3e8;
+    background: var(--surface);
+    color: var(--ink);
   }
 
-  /* Scrollbar: workspace (dark) panels */
-  .scrollbar-dark {
+  ::selection {
+    background: var(--accent-soft);
+  }
+
+  /* Ổ cuộn mảnh, chỉ hiện khi cần */
+  .scroll-thin {
     scrollbar-width: thin;
-    scrollbar-color: #1f2e45 transparent;
+    scrollbar-color: var(--line-strong) transparent;
   }
-  .scrollbar-dark::-webkit-scrollbar { width: 5px; }
-  .scrollbar-dark::-webkit-scrollbar-track { background: transparent; }
-  .scrollbar-dark::-webkit-scrollbar-thumb { background: #1f2e45; border-radius: 99px; }
-  .scrollbar-dark::-webkit-scrollbar-thumb:hover { background: #2a3f60; }
-
-  /* Scrollbar: output (light) pane */
-  .scrollbar-light {
-    scrollbar-width: thin;
-    scrollbar-color: #d1cfc9 transparent;
+  .scroll-thin::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
   }
-  .scrollbar-light::-webkit-scrollbar { width: 5px; }
-  .scrollbar-light::-webkit-scrollbar-track { background: transparent; }
-  .scrollbar-light::-webkit-scrollbar-thumb { background: #d1cfc9; border-radius: 99px; }
-  .scrollbar-light::-webkit-scrollbar-thumb:hover { background: #b8b5af; }
+  .scroll-thin::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .scroll-thin::-webkit-scrollbar-thumb {
+    background: var(--line-strong);
+    border-radius: 99px;
+    border: 2px solid var(--surface);
+  }
+  .scroll-thin::-webkit-scrollbar-thumb:hover {
+    background: var(--ink-4);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
 }
 
-.font-serif-brand {
-  font-family: var(--font-serif-brand);
+/* ── Chữ ───────────────────────────────────────────────────────────────────── */
+
+.t-display {
+  font-size: 26px;
+  font-weight: 500;
+  letter-spacing: -0.4px;
+  line-height: 1.2;
+  color: var(--ink);
 }
 
-.font-sans-brand {
-  font-family: var(--font-sans-brand);
+.t-title {
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--ink);
 }
 
-/* Graph-paper texture for upload zones */
-.graph-bg {
-  background-image:
-    linear-gradient(rgba(31, 46, 69, 0.45) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(31, 46, 69, 0.45) 1px, transparent 1px);
-  background-size: 28px 28px;
-  background-color: #101623;
+.t-body {
+  font-size: 13.5px;
+  color: var(--ink-2);
 }
 
-/* Subtle inner glow on the gold CTA button */
-.btn-gold {
-  background: #FFAD1D;
-  box-shadow: 0 0 22px rgba(255, 173, 29, 0.18), 0 2px 6px rgba(0,0,0,0.3);
-  transition: background 0.15s, box-shadow 0.15s;
+.t-small {
+  font-size: 12.5px;
+  color: var(--ink-3);
 }
-.btn-gold:hover:not(:disabled) {
-  background: #e89c10;
-  box-shadow: 0 0 30px rgba(255, 173, 29, 0.28), 0 3px 8px rgba(0,0,0,0.35);
+
+/* Nhãn khu vực: chữ nhỏ, giãn nhẹ, không in hoa toàn bộ cho đỡ ồn */
+.t-label {
+  font-size: 11.5px;
+  font-weight: 500;
+  letter-spacing: 0.3px;
+  color: var(--ink-3);
 }
-.btn-gold:disabled {
-  opacity: 0.35;
+
+/* ── Nút ───────────────────────────────────────────────────────────────────── */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 16px;
+  border-radius: 999px;
+  font-size: 13.5px;
+  font-weight: 500;
+  border: 1px solid transparent;
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.btn:disabled {
+  opacity: 0.38;
   cursor: not-allowed;
-  box-shadow: none;
 }
 
-/* Code block syntax feel */
-.code-surface {
-  background: #101622;
-  border: 1px solid #1f2e45;
+.btn-primary {
+  background: var(--accent);
+  color: #fff;
+}
+.btn-primary:hover:not(:disabled) {
+  background: var(--accent-hover);
 }
 
-/* KaTeX output in output pane */
-.katex-output .katex { font-size: 1.1em; }
-
-/* Progress bar shimmer */
-@keyframes shimmer {
-  0%   { background-position: -400px 0; }
-  100% { background-position: 400px 0; }
+.btn-tonal {
+  background: var(--accent-soft);
+  color: var(--accent);
 }
-.progress-shimmer {
-  background: linear-gradient(90deg, #FFAD1D 0%, #ffd16a 50%, #FFAD1D 100%);
-  background-size: 400px 100%;
-  animation: shimmer 1.6s infinite linear;
+.btn-tonal:hover:not(:disabled) {
+  background: #d7e5fd;
+}
+
+.btn-outline {
+  background: transparent;
+  color: var(--ink-2);
+  border-color: var(--line-strong);
+}
+.btn-outline:hover:not(:disabled) {
+  background: var(--surface-2);
+  color: var(--ink);
+}
+
+.btn-text {
+  background: transparent;
+  color: var(--ink-2);
+  padding: 0 10px;
+  height: 32px;
+}
+.btn-text:hover:not(:disabled) {
+  background: var(--surface-2);
+  color: var(--ink);
+}
+
+.btn-sm {
+  height: 30px;
+  font-size: 12.5px;
+  padding: 0 12px;
+}
+
+/* ── Khối, đường kẻ, ô nhập ────────────────────────────────────────────────── */
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+
+.hairline-b {
+  border-bottom: 1px solid var(--line);
+}
+.hairline-r {
+  border-right: 1px solid var(--line);
+}
+
+.input {
+  width: 100%;
+  height: 44px;
+  padding: 0 14px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 14px;
+  transition: border-color 0.12s, box-shadow 0.12s;
+}
+.input::placeholder {
+  color: var(--ink-4);
+}
+.input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+/* Vùng thả file: chỉ một đường viền nét đứt, không hoa văn */
+.dropzone {
+  border: 1px dashed var(--line-strong);
+  border-radius: 12px;
+  background: var(--surface-2);
+  transition: border-color 0.12s, background 0.12s;
+  cursor: pointer;
+}
+.dropzone:hover {
+  border-color: var(--ink-4);
+  background: var(--surface-3);
+}
+.dropzone[data-active="true"] {
+  border-color: var(--accent);
+  border-style: solid;
+  background: var(--accent-soft);
+}
+
+/* Tab kiểu chip phẳng */
+.seg {
+  display: inline-flex;
+  gap: 4px;
+  padding: 3px;
+  background: var(--surface-3);
+  border-radius: 999px;
+}
+.seg-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 14px;
+  border-radius: 999px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--ink-3);
+  transition: background 0.12s, color 0.12s;
+  cursor: pointer;
+}
+.seg-item:hover {
+  color: var(--ink);
+}
+.seg-item[data-on="true"] {
+  background: var(--surface);
+  color: var(--accent);
+}
+
+.progress {
+  height: 3px;
+  border-radius: 99px;
+  background: var(--surface-3);
+  overflow: hidden;
+}
+.progress > span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.25s ease;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 500;
+}
+.badge-ok {
+  background: #e6f4ea;
+  color: var(--ok);
+}
+.badge-warn {
+  background: #fef7e0;
+  color: var(--warn);
+}
+.badge-err {
+  background: #fce8e6;
+  color: var(--err);
+}
+.badge-neutral {
+  background: var(--surface-3);
+  color: var(--ink-3);
+}
+
+/* ── Khung xem trước tài liệu ───────────────────────────────────────────────── */
+
+.doc-sheet {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 56px 64px;
+  max-width: 860px;
+  margin: 0 auto;
+  color: #000;
+  font-size: 15px;
+  line-height: 1.65;
+}
+
+.doc-sheet table {
+  border-collapse: collapse;
+  margin: 12px 0;
+}
+.doc-sheet table td,
+.doc-sheet table th {
+  border: 1px solid var(--line-strong);
+  padding: 5px 10px;
+}
+.doc-sheet img {
+  max-width: 100%;
+  display: block;
+  margin: 14px auto;
+}
+
+/* Ô soạn thảo MMD: chữ đơn cách để nhìn được thụt lề và bảng */
+.editor {
+  width: 100%;
+  height: 100%;
+  padding: 24px 28px;
+  border: 0;
+  resize: none;
+  background: var(--surface);
+  color: var(--ink);
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 12.5px;
+  line-height: 20px;
+  tab-size: 2;
+}
+.editor:focus {
+  outline: none;
 }

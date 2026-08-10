@@ -4,13 +4,6 @@
  * and anti-hallucination instructions.
  */
 
-// ─── Model & Temperature ─────────────────────────────────────────────────────
-
-export const GEMINI_MODEL = 'gemini-pro-latest';
-export const TEMP_PRECISE = 0.1;   // PDF page analysis, TikZ verify
-export const TEMP_STANDARD = 0.15; // Image→LaTeX
-export const TEMP_CREATIVE = 0.4;  // TikZ Draft B
-
 // ─── LaTeX Math Transcription Rules ──────────────────────────────────────────
 // Used by both Image→LaTeX (SYSTEM_INSTRUCTION) and PDF→DOCX (PDF_ANALYSIS_PROMPT)
 
@@ -140,17 +133,4 @@ Common pre-computed values (use these directly):
 
 Every coordinate value must be a plain integer or decimal. No {} around computed
 expressions. No function calls. No PGF math operators inside coordinate values.
-`;
-
-// ─── Output format guardrails ────────────────────────────────────────────────
-// Shared constraints to reduce LLM output variability
-
-export const OUTPUT_FORMAT_RULES = `
-OUTPUT FORMAT — strict rules:
-- Never wrap output in markdown code fences unless explicitly told to use \`\`\`latex.
-- Never add explanatory text before or after the code/JSON.
-- Never add comments like "Here is the code:" or "Note:".
-- If asked for JSON, output ONLY the JSON object starting with { and ending with }.
-- If asked for TikZ, output ONLY the TikZ code starting with % Required or \\begin{tikzpicture}.
-- If asked for LaTeX, output ONLY the LaTeX wrapped in $...$.
 `;

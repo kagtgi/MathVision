@@ -2,7 +2,7 @@
   "name": "math-vision",
   "private": true,
   "version": "1.0.0",
-  "description": "An expert AI assistant for mathematics teachers — converts handwritten or printed math content from images into clean, ready-to-use LaTeX and TikZ code.",
+  "description": "Chuyển đề thi toán từ ảnh hoặc PDF thành file Word đúng chuẩn, tự giải và sinh đáp án chi tiết.",
   "author": "MathVision Team",
   "license": "MIT",
   "type": "module",
@@ -14,33 +14,36 @@
     "clean": "node -e \"const fs=require('fs');fs.rmSync('dist',{recursive:true,force:true})\"",
     "lint": "tsc --noEmit",
     "electron:preview": "npm run build && electron .",
-    "electron:build": "node scripts/fix-electron-cache.cjs && npm run build && electron-builder --win"
+    "electron:build": "node scripts/fix-electron-cache.cjs && npm run build && electron-builder --win",
+    "verify": "node scripts/verify-pipeline.mjs && node scripts/verify-docx.mjs && node scripts/verify-solver-shape.mjs && node scripts/verify-vdc.mjs && node scripts/verify-textlayer.mjs"
   },
   "dependencies": {
     "@google/genai": "^1.29.0",
     "docx": "^9.6.1",
     "framer-motion": "^12.38.0",
-    "katex": "^0.16.39",
     "lucide-react": "^0.546.0",
     "pdfjs-dist": "4.10.38",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "react-dropzone": "^15.0.0",
-    "react-markdown": "^10.1.0",
-    "rehype-katex": "^7.0.1",
-    "remark-gfm": "^4.0.1",
-    "remark-math": "^6.0.0"
+    "react-dropzone": "^15.0.0"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.1.14",
     "@types/node": "^22.14.0",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
     "@vitejs/plugin-react": "^5.0.4",
     "autoprefixer": "^10.4.21",
     "electron": "^33.4.11",
     "electron-builder": "^25.1.8",
+    "mathpix-markdown-it": "^3.0.1",
+    "png-to-ico": "^3.0.2",
+    "sharp": "^0.35.3",
+    "subset-font": "^2.5.0",
     "tailwindcss": "^4.1.14",
     "typescript": "~5.8.2",
-    "vite": "^6.2.0"
+    "vite": "^6.2.0",
+    "wawoff2": "^2.0.1"
   },
   "build": {
     "appId": "ai.tasih.mathvision",
@@ -50,17 +53,34 @@
     },
     "files": [
       "dist/**/*",
-      "electron/main.cjs"
+      "electron/main.cjs",
+      "package.json",
+      "!node_modules/**"
     ],
     "win": {
       "target": [
         {
-          "target": "zip",
+          "target": "portable",
           "arch": [
             "x64"
           ]
         }
-      ]
-    }
+      ],
+      "icon": "build/icon.ico",
+      "artifactName": "MathVision-${version}.${ext}"
+    },
+    "portable": {
+      "unpackDirName": false,
+      "artifactName": "MathVision-${version}.exe"
+    },
+    "extraResources": [
+      {
+        "from": "mathtype",
+        "to": "mathtype",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ]
   }
 }

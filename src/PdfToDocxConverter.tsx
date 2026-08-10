@@ -194,13 +194,16 @@ export default function PdfToDocxConverter({ apiKey, models }: Props) {
       figuresRef.current = map;
       setFigures(new Map(map));
 
-      if (toggles.redrawTikz) {
+      // Dựng TikZ CHẠY SONG SONG với bước giải đề: cả hai đều chờ Gemini, nối tiếp nhau
+      // thì người dùng phải đợi thêm vài phút mới bấm được nút Tải. Chờ cả hai xong rồi
+      // mới hiện kết quả, nên thứ nhìn thấy vẫn là bản cuối.
+      const tikzWork = (async () => {
+        if (!toggles.redrawTikz) return;
         const drawable = figureJobs.filter((j) => j.kind === 've' && map.has(j.id));
         const skipped = figureJobs.length - drawable.length;
         for (const [i, job] of drawable.entries()) {
           if (controller.signal.aborted) return;
-          setStage(`Đang vẽ lại hình ${i + 1}/${drawable.length} bằng TikZ…`);
-          setProgress({ done: i + 1, total: drawable.length });
+          addLog(`TikZ: đang vẽ lại hình ${i + 1}/${drawable.length} (${job.id})`);
           const ok = await redrawOne(job.id, map.get(job.id)!, controller);
           if (!ok) allWarnings.push(`Hình ${job.id}: dựng TikZ không đạt — dùng ảnh cắt từ đề.`);
         }
@@ -208,7 +211,7 @@ export default function PdfToDocxConverter({ apiKey, models }: Props) {
           allWarnings.push(`${skipped} hình là ảnh chụp vật thật — giữ nguyên ảnh gốc.`);
         }
         setFigures(new Map(figuresRef.current));
-      }
+      })();
 
       // ── Chặng văn bản: chuẩn hoá → tự giải → tái cấu trúc → QC ──
       setStage(toggles.autoSolve ? 'Đang giải đề…' : 'Đang chuẩn hoá nội dung…');
@@ -237,6 +240,10 @@ export default function PdfToDocxConverter({ apiKey, models }: Props) {
           },
         },
       });
+
+      // Chờ nốt phần vẽ hình đang chạy song song, để bản hiện ra là bản cuối.
+      setStage('Đang hoàn tất hình vẽ…');
+      await tikzWork;
 
       for (const [id, fig] of result.newFigures) {
         figuresRef.current.set(id, { ...fig, source: 'tikz' });

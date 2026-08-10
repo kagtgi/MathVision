@@ -1,6 +1,6 @@
 'use strict';
 
-const { app, BrowserWindow, shell, session } = require('electron');
+const { app, BrowserWindow, dialog, shell, session } = require('electron');
 const fs = require('fs');
 const path = require('path');
 
@@ -13,7 +13,7 @@ const path = require('path');
 function setupDownloads() {
   let lastDir = null;
 
-  session.defaultSession.on('will-download', (_event, item) => {
+  session.defaultSession.on('will-download', (_event, item, webContents) => {
     const name = item.getFilename();
     const ext = path.extname(name).toLowerCase();
     const dir = lastDir && fs.existsSync(lastDir) ? lastDir : app.getPath('downloads');
@@ -23,18 +23,40 @@ function setupDownloads() {
         ? [{ name: 'Văn bản', extensions: ['txt'] }]
         : [{ name: 'Tài liệu Word', extensions: ['docx'] }];
 
-    // Không gọi setSavePath -> Electron tự bung hộp thoại lưu với các tuỳ chọn này.
-    item.setSaveDialogOptions({
-      title: 'Lưu file',
-      defaultPath: path.join(dir, name),
-      filters: [...filters, { name: 'Tất cả', extensions: ['*'] }],
-      buttonLabel: 'Lưu',
-    });
+    // TỰ gọi hộp thoại rồi TỰ đặt đường dẫn.
+    //
+    // Cách gọn hơn là chỉ khai `item.setSaveDialogOptions(...)` và để Electron tự bung
+    // hộp thoại, nhưng thực tế bấm Tải thì KHÔNG có gì hiện ra và cũng không có file nào
+    // được ghi. Bản đồng bộ này chắc chắn chạy: hộp thoại hiện ngay, huỷ thì huỷ tải,
+    // chọn xong thì ghi đúng chỗ đã chọn.
+    let target = null;
+    try {
+      const win = webContents ? BrowserWindow.fromWebContents(webContents) : null;
+      const options = {
+        title: 'Lưu file',
+        defaultPath: path.join(dir, name),
+        filters: [...filters, { name: 'Tất cả', extensions: ['*'] }],
+        buttonLabel: 'Lưu',
+      };
+      target = win ? dialog.showSaveDialogSync(win, options) : dialog.showSaveDialogSync(options);
+    } catch {
+      target = null;
+    }
 
+    if (target === undefined || target === null) {
+      // Người dùng bấm Huỷ, hoặc hộp thoại không mở được. Trường hợp sau mà bỏ luôn thì
+      // coi như mất file, nên lưu tạm vào Downloads còn hơn không có gì.
+      if (target === undefined) {
+        item.cancel();
+        return;
+      }
+      target = path.join(app.getPath('downloads'), name);
+    }
+
+    item.setSavePath(target);
+    const saved = target;
     item.once('done', (_e, state) => {
       if (state !== 'completed') return;
-      const saved = item.getSavePath();
-      if (!saved) return;
       lastDir = path.dirname(saved);
       shell.showItemInFolder(saved);
     });

@@ -5,28 +5,38 @@ const fs = require('fs');
 const path = require('path');
 
 /**
- * File tải về luôn vào thư mục Downloads, rồi tự mở Explorer chỉ đúng file đó.
+ * Mỗi lần tải là hiện hộp thoại cho người dùng tự chọn thư mục, và nhớ thư mục vừa chọn
+ * làm mặc định cho lần sau — giáo viên thường lưu cả loạt đề vào cùng một chỗ.
  *
- * Mặc định của Electron là bung hộp thoại "Save As" mỗi lần tải — với người dùng là giáo
- * viên thì vừa thêm một bước, vừa hay bị bấm nhầm rồi không biết file nằm đâu. Cách này
- * bỏ hẳn hộp thoại và trả lời luôn câu "file vừa tải nằm ở đâu".
+ * Xong thì mở Explorer chỉ đúng file vừa lưu, để không phải đi tìm.
  */
 function setupDownloads() {
-  session.defaultSession.on('will-download', (_event, item) => {
-    const dir = app.getPath('downloads');
-    const name = item.getFilename();
-    const ext = path.extname(name);
-    const base = path.basename(name, ext);
+  let lastDir = null;
 
-    // Trùng tên thì thêm (1), (2)... giống Chrome, không ghi đè file cũ.
-    let target = path.join(dir, name);
-    for (let i = 1; fs.existsSync(target); i++) {
-      target = path.join(dir, `${base} (${i})${ext}`);
-    }
-    item.setSavePath(target);
+  session.defaultSession.on('will-download', (_event, item) => {
+    const name = item.getFilename();
+    const ext = path.extname(name).toLowerCase();
+    const dir = lastDir && fs.existsSync(lastDir) ? lastDir : app.getPath('downloads');
+
+    const filters =
+      ext === '.txt'
+        ? [{ name: 'Văn bản', extensions: ['txt'] }]
+        : [{ name: 'Tài liệu Word', extensions: ['docx'] }];
+
+    // Không gọi setSavePath -> Electron tự bung hộp thoại lưu với các tuỳ chọn này.
+    item.setSaveDialogOptions({
+      title: 'Lưu file',
+      defaultPath: path.join(dir, name),
+      filters: [...filters, { name: 'Tất cả', extensions: ['*'] }],
+      buttonLabel: 'Lưu',
+    });
 
     item.once('done', (_e, state) => {
-      if (state === 'completed') shell.showItemInFolder(target);
+      if (state !== 'completed') return;
+      const saved = item.getSavePath();
+      if (!saved) return;
+      lastDir = path.dirname(saved);
+      shell.showItemInFolder(saved);
     });
   });
 }

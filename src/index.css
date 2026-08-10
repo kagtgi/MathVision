@@ -357,6 +357,33 @@
   margin: 14px auto;
 }
 
+/* ── Xem trước file Word (docx-preview) ─────────────────────────────────────── */
+
+/* docx-preview tự đặt khổ giấy và lề theo sectPr, ở đây chỉ lo phần khung ngoài. */
+.docx-preview .docx-wrapper {
+  background: transparent;
+  padding: 0;
+  gap: 20px;
+}
+
+.docx-preview .docx-wrapper > section.docx {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+  margin: 0 auto;
+}
+
+/* Công thức thay vào giữa dòng chữ: canh theo đường chân chữ, đừng làm giãn dòng. */
+.docx-preview .mv-math {
+  display: inline-block;
+  vertical-align: middle;
+  line-height: 0;
+}
+.docx-preview .mv-math svg {
+  vertical-align: middle;
+}
+
 /* Ô soạn thảo MMD: chữ đơn cách để nhìn được thụt lề và bảng */
 .editor {
   width: 100%;

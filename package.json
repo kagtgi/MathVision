@@ -20,6 +20,7 @@
   "dependencies": {
     "@google/genai": "^1.29.0",
     "docx": "^9.6.1",
+    "docx-preview": "^0.4.0",
     "framer-motion": "^12.38.0",
     "lucide-react": "^0.546.0",
     "pdfjs-dist": "4.10.38",

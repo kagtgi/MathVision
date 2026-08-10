@@ -55,10 +55,69 @@ Chọn ở thanh công cụ phía trên bản xem trước:
 Ở định dạng VDC có thêm nút **Tải .txt** — bản văn bản thuần theo quy ước nhập liệu của
 nhóm (mỗi phương án một dòng, công thức dùng `\left`/`\right`, `{A}'`, `\int\limits`).
 
-Trước khi tải về, bạn xem trước được toàn bộ tài liệu, **sửa trực tiếp** nội dung, và xem
-danh sách cảnh báo kiểm tra chất lượng.
+Trước khi tải về, tab **Xem trước** dựng đúng file Word sắp tải — đúng khổ giấy, lề, màu
+chữ và cách trình bày phương án; công thức được hiển thị sẵn thay cho chữ `$...<div align="center">
 
-File tải về nằm trong thư mục **Downloads**, và app tự mở Explorer chỉ đúng file vừa tải.
+<img src="logo.jpg" alt="MathVision" width="360" />
+
+# MathVision
+
+### Ảnh hoặc PDF đề thi toán → file Word đúng chuẩn, có sẵn đáp án chi tiết
+
+Thả một file PDF (hoặc ảnh chụp) đề thi vào, nhận về `.docx` đã chuẩn hoá bố cục,
+tự giải toàn bộ đề và dựng mục **ĐÁP ÁN CHI TIẾT** theo văn phong sách giáo khoa THPT.
+
+Chạy hoàn toàn trên máy bằng **Google Gemini** — chỉ cần nhập API key một lần.
+
+</div>
+
+---
+
+## Dùng ngay (không cần cài gì)
+
+1. Tải `MathVision-1.0.0.exe` (bản portable, chạy trực tiếp).
+2. Lấy API key miễn phí tại **https://aistudio.google.com/apikey**.
+3. Mở app, dán key, bấm **Kiểm tra và bắt đầu**. Key lưu trên máy, lần sau không phải nhập lại.
+
+> Windows SmartScreen có thể cảnh báo vì file chưa ký số: bấm **More info** → **Run anyway**.
+
+## Làm được gì
+
+| Chế độ | Đầu vào | Đầu ra |
+|:---|:---|:---|
+| **PDF → Word** | PDF đề thi, tối đa 50 MB | `.docx` chuẩn + đáp án chi tiết |
+| **Ảnh → Word** | Ảnh chụp/quét trang đề (PNG, JPG, WebP) | như trên |
+
+Các bước app tự làm:
+
+- **Đọc đề** từng trang, giữ nguyên công thức, bảng số liệu, phương án A–D.
+- **Cắt hình** trong đề ra khỏi trang PDF. Hình luôn có — nếu vẽ lại bằng TikZ không thành
+  công thì vẫn dùng ảnh cắt, không bao giờ để chỗ trống.
+- **Tự giải cả đề**: trắc nghiệm, đúng/sai, trả lời ngắn, tự luận. Giải hai lượt độc lập
+  rồi đối chiếu; lệch nhau thì có lượt thứ ba phân xử và câu đó được đánh dấu để bạn soi lại.
+- **Tự vẽ hình** cho bài hình học không gian lớp 11 khi đề chưa có hình.
+- **Dựng bố cục chuẩn**: bỏ phiếu tô trắc nghiệm, chuẩn hoá tiêu đề PHẦN, lặp lại từng câu
+  trong mục ĐÁP ÁN CHI TIẾT với đáp án đúng gạch chân, dòng "Lời giải", "Chọn X." tô xanh.
+- **Đối chiếu với lớp văn bản có sẵn trong PDF** để bắt câu bị bỏ sót, số bị đọc sai hay
+  nội dung máy tự thêm. Chỉ báo cho bạn xem, không tự sửa.
+
+### Hai định dạng đầu ra
+
+Chọn ở thanh công cụ phía trên bản xem trước:
+
+| Định dạng | Dùng khi | Đặc điểm |
+|:---|:---|:---|
+| **Định dạng thường** | đề tặng kèm K11 | Times New Roman 12pt, có nhãn "Câu N.", đáp án đúng gạch chân, dòng "Chọn X." tô xanh lá, footer số trang |
+| **Định dạng VDC** | nộp cho nhóm VDC Bhp | Palatino Linotype 11.5pt, bỏ nhãn "Câu N.", bốn phương án một dòng, đáp án đúng **đỏ + bôi vàng + gạch chân**, ý đúng/sai thành dòng riêng IN HOA, câu trả lời ngắn dùng ô đáp án bôi vàng, có header của nhóm |
+
+Ở định dạng VDC có thêm nút **Tải .txt** — bản văn bản thuần theo quy ước nhập liệu của
+nhóm (mỗi phương án một dòng, công thức dùng `\left`/`\right`, `{A}'`, `\int\limits`).
+
+. Bạn
+cũng **sửa trực tiếp** nội dung ở tab MMD và xem danh sách cảnh báo chất lượng.
+
+Bấm **Tải Word** sẽ hiện hộp thoại chọn thư mục lưu (lần sau mặc định vào thư mục vừa
+chọn), lưu xong app tự mở Explorer chỉ đúng file đó.
 
 ## Sau khi tải file Word
 

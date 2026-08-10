@@ -5,7 +5,7 @@
  * nên người dùng sửa gì là ra đúng cái đó.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Packer } from 'docx';
 import {
   AlertCircle,
@@ -19,18 +19,13 @@ import {
   ShieldCheck,
 } from 'lucide-react';
 
-import { figureDataUrl, makeFigureResolver, type FigureMap } from '../pipeline/figures';
+import { makeFigureResolver, type FigureMap } from '../pipeline/figures';
 import { FORMATS, type DocFormat } from '../pipeline/formats';
 import { buildExamDocx } from '../pipeline/mmdToDocx';
 import { buildVdcDocx } from '../pipeline/mmdToDocxVdc';
 import { mmdToVdcTxt } from '../pipeline/mmdToVdcTxt';
-import {
-  isRendererReady,
-  lintMmd,
-  loadMathpixRenderer,
-  renderMmdHtml,
-  type RenderLintIssue,
-} from '../pipeline/mathpixPreview';
+import { lintMmd, loadMathpixRenderer, type RenderLintIssue } from '../pipeline/mathpixPreview';
+import { renderDocxPreview } from '../pipeline/docxPreview';
 import type { QcIssue } from '../pipeline/qc';
 
 type Tab = 'preview' | 'source' | 'qc';
@@ -60,49 +55,55 @@ export default function MmdWorkbench({
   onFormatChange,
 }: Props) {
   const [tab, setTab] = useState<Tab>('preview');
-  const [html, setHtml] = useState<string | null>(null);
-  const [rendererFailed, setRendererFailed] = useState(false);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+  const [previewing, setPreviewing] = useState(false);
   const [lint, setLint] = useState<RenderLintIssue[]>([]);
   const [downloading, setDownloading] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const previewRef = useRef<HTMLDivElement>(null);
 
-  const dataUrls = useMemo(() => {
-    const m = new Map<string, string>();
-    for (const [id, fig] of figures) m.set(id, figureDataUrl(fig));
-    return m;
-  }, [figures]);
-
-  const dataUrlFor = useCallback((id: string) => dataUrls.get(id) ?? null, [dataUrls]);
-
-  // Nạp bộ render một lần, rồi render lại có tiết chế khi MMD đổi.
+  // Nạp bộ dựng công thức ngay từ đầu để lúc xem trước không phải chờ.
   useEffect(() => {
-    let cancelled = false;
-    loadMathpixRenderer().then((ok) => {
-      if (!cancelled && !ok) setRendererFailed(true);
-    });
-    return () => {
-      cancelled = true;
-    };
+    void loadMathpixRenderer();
   }, []);
 
+  // Xem trước = dựng đúng file .docx sắp tải, bằng chính hàm dùng cho nút Tải.
   useEffect(() => {
-    if (tab !== 'preview' && tab !== 'qc') return;
+    if (tab !== 'preview' || !mmd.trim()) return;
     let cancelled = false;
+    setPreviewing(true);
     const timer = setTimeout(async () => {
-      const ok = await loadMathpixRenderer();
-      if (cancelled) return;
-      if (!ok) {
-        setRendererFailed(true);
-        return;
+      try {
+        const resolver = makeFigureResolver(figures);
+        const doc = format === 'vdc' ? buildVdcDocx(mmd, resolver) : buildExamDocx(mmd, resolver);
+        const blob = await Packer.toBlob(doc);
+        if (cancelled || !previewRef.current) return;
+        const res = await renderDocxPreview(previewRef.current, blob);
+        if (!cancelled) setPreviewError(res.ok ? null : (res.error ?? 'Không dựng được bản xem trước.'));
+      } catch (err) {
+        if (!cancelled) {
+          setPreviewError(err instanceof Error ? err.message : 'Không dựng được bản xem trước.');
+        }
+      } finally {
+        if (!cancelled) setPreviewing(false);
       }
-      setHtml(renderMmdHtml(mmd, dataUrlFor));
-      setLint(lintMmd(mmd));
-    }, 300);
+    }, 400);
     return () => {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [mmd, tab, dataUrlFor]);
+  }, [mmd, tab, figures, format]);
+
+  useEffect(() => {
+    if (tab !== 'qc') return;
+    let cancelled = false;
+    loadMathpixRenderer().then((ok) => {
+      if (!cancelled && ok) setLint(lintMmd(mmd));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [mmd, tab]);
 
   const errors = issues.filter((i) => i.severity === 'error');
   const warns = issues.filter((i) => i.severity === 'warn');
@@ -230,20 +231,19 @@ export default function MmdWorkbench({
       {/* Nội dung tab */}
       <div className="flex-1 overflow-y-auto min-h-0 scroll-thin">
         {tab === 'preview' && (
-          <div className="p-8">
-            {rendererFailed ? (
-              <p className="t-body">
-                Không nạp được bộ hiển thị công thức. Nội dung vẫn đầy đủ ở tab MMD và file
-                Word tải về không bị ảnh hưởng.
-              </p>
-            ) : html ? (
-              <div className="mmd-preview doc-sheet" dangerouslySetInnerHTML={{ __html: html }} />
-            ) : (
-              <p className="t-small flex items-center gap-2">
+          <div className="p-6">
+            {previewing && (
+              <p className="t-small flex items-center gap-2 mb-3">
                 <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                {isRendererReady() ? 'Đang dựng bản xem trước…' : 'Đang nạp bộ hiển thị công thức…'}
+                Đang dựng bản xem trước file Word…
               </p>
             )}
+            {previewError && (
+              <p className="t-body mb-3" style={{ color: 'var(--warn)' }}>
+                {previewError} — nội dung vẫn đầy đủ ở tab MMD, file tải về không bị ảnh hưởng.
+              </p>
+            )}
+            <div ref={previewRef} className="docx-preview" />
           </div>
         )}
 

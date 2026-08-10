@@ -92,6 +92,30 @@ export function renderMmdHtml(mmd: string, dataUrlFor: (id: string) => string | 
   }
 }
 
+/**
+ * Render MỘT công thức inline thành HTML, dùng cho bản xem trước file Word.
+ *
+ * Bộ dựng gói công thức trong `<div id="preview">…<p>…</p></div>`; ở đây cần đúng phần
+ * ruột để nhét lại vào giữa dòng chữ, nên bóc lớp block ra.
+ */
+export function renderInlineMath(tex: string): string | null {
+  const fn = globals().markdownToHTML;
+  if (!fn) return null;
+  try {
+    const html = fn(`$${tex}$`, BASE_OPTIONS);
+    if (!html) return null;
+    const holder = document.createElement('div');
+    holder.innerHTML = html;
+    // Lấy phần tử toán đầu tiên nếu có, không thì lấy nội dung của đoạn văn bao ngoài.
+    const mjx = holder.querySelector('mjx-container, svg, .math-inline');
+    if (mjx) return mjx.outerHTML;
+    const p = holder.querySelector('p');
+    return p ? p.innerHTML : holder.innerHTML;
+  } catch {
+    return null;
+  }
+}
+
 export interface RenderLintIssue {
   message: string;
   snippet: string;

@@ -98,7 +98,7 @@ equation do thư viện sinh ra, và đây là cách file mẫu chuẩn đang d�
 ```bash
 npm install
 npm run dev              # http://localhost:3000
-npm run verify           # 5 bộ kiểm chứng, phải PASS hết trước khi commit
+npm run verify           # 6 bộ kiểm chứng, phải PASS hết trước khi commit
 npm run electron:build   # -> release/MathVision-<version>.exe
 ```
 
@@ -125,8 +125,9 @@ Dựng lại bằng `node scripts/build-fonts.mjs <thư-mục-Google_Sans>`.
 | `verify-solver-shape.mjs` | Khối lời giải do máy sinh phải chạy lọt qua bước tái cấu trúc, kể cả đề không chia PHẦN |
 | `verify-vdc.mjs` | docx và .txt định dạng VDC khớp file mẫu của nhóm, và định dạng thường không bị ảnh hưởng |
 | `verify-textlayer.mjs` | Lớp đối chiếu văn bản PDF bắt được lỗi thật mà không báo oan |
+| `verify-download.mjs` | Bấm Tải trong bản đóng gói thì file thật sự được ghi ra đĩa |
 
-Sửa gì trong `src/pipeline/` cũng phải chạy lại cả năm — đó là bằng chứng duy nhất cho việc
+Sửa gì trong `src/pipeline/` hay `electron/` cũng phải chạy lại cả sáu — đó là bằng chứng duy nhất cho việc
 định dạng đầu ra không bị lệch khỏi file mẫu.
 
 ## Công nghệ

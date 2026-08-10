@@ -15,7 +15,7 @@
     "lint": "tsc --noEmit",
     "electron:preview": "npm run build && electron .",
     "electron:build": "node scripts/fix-electron-cache.cjs && npm run build && electron-builder --win",
-    "verify": "node scripts/verify-pipeline.mjs && node scripts/verify-docx.mjs && node scripts/verify-solver-shape.mjs && node scripts/verify-vdc.mjs && node scripts/verify-textlayer.mjs"
+    "verify": "node scripts/verify-pipeline.mjs && node scripts/verify-docx.mjs && node scripts/verify-solver-shape.mjs && node scripts/verify-vdc.mjs && node scripts/verify-textlayer.mjs && node scripts/verify-download.mjs"
   },
   "dependencies": {
     "@google/genai": "^1.29.0",

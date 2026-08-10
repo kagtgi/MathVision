@@ -60,6 +60,14 @@ export default function App() {
     return (
       <div className="min-h-screen flex items-center justify-center p-8">
         <div className="w-full max-w-[420px]">
+          <img
+            src="./logo-mark.png"
+            alt=""
+            width={72}
+            height={72}
+            className="mb-5 rounded-2xl"
+            style={{ display: 'block' }}
+          />
           <h1 className="t-display">MathVision</h1>
           <p className="t-body mt-3">
             Đề thi toán dạng PDF hoặc ảnh, chuyển thành file Word đúng chuẩn kèm đáp án chi
@@ -129,8 +137,11 @@ export default function App() {
     <div className="h-full flex flex-col">
       <header className="shrink-0 h-14 hairline-b flex items-center justify-between px-5">
         <div className="flex items-center gap-6">
-          <span className="t-title" style={{ letterSpacing: '-0.2px' }}>
-            MathVision
+          <span className="flex items-center gap-2">
+            <img src="./logo-mark.png" alt="" width={22} height={22} className="rounded-md" />
+            <span className="t-title" style={{ letterSpacing: '-0.2px' }}>
+              MathVision
+            </span>
           </span>
 
           <div className="seg">

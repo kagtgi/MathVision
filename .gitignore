@@ -3,6 +3,7 @@ build/
 dist/
 coverage/
 release/
+release-new/
 demo/
 .DS_Store
 *.log

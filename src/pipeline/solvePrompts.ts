@@ -8,7 +8,7 @@
  */
 
 import { LATEX_MATH_RULES } from '../utils/sharedPrompts.ts';
-import { figureRulesFor } from '../utils/figurePrompts.ts';
+import { FIGURE_STYLE_BRIEF, figureRulesFor } from '../utils/figurePrompts.ts';
 import { tikzCapsRules } from '../utils/tikzCapabilities.ts';
 
 export type QType = 'TN' | 'DS' | 'TLN' | 'TL';
@@ -77,14 +77,9 @@ Khi vẽ, hình phải HOÀN CHỈNH:
 - Vẽ đủ đường cao, đoạn phụ, chân đường vuông góc mà lời giải có nhắc tới.
 - Đánh dấu góc vuông ở nơi cần thiết.
 
-Áp đúng quy ước của LOẠI hình mình đang vẽ:
-${figureRulesFor('khonggian')}
+${FIGURE_STYLE_BRIEF}
 
-Nếu vẽ BẢNG BIẾN THIÊN thì theo luật riêng sau:
-${figureRulesFor('bbt')}
-
-Nếu vẽ ĐỒ THỊ HÀM SỐ thì theo luật riêng sau:
-${figureRulesFor('dothi')}`;
+${tikzCapsRules()}`;
 
 const TYPE_RULES: Record<QType, string> = {
   TN: String.raw`LOẠI CÂU: trắc nghiệm bốn phương án.
@@ -130,7 +125,13 @@ export function solvePrompt(type: QType, variant: 0 | 1 | 2): string {
   ].join('\n');
 }
 
-/** Prompt soi lại hình vừa dựng, dựa trên ảnh render thật. */
+/**
+ * Prompt soi lại hình vừa dựng, dựa trên ảnh render thật.
+ *
+ * ĐÂY là chỗ mang luật vẽ ĐẦY ĐỦ, không phải `solvePrompt`: lượt này chỉ chạy cho câu thật sự
+ * có hình (vài hình mỗi đề), còn `solvePrompt` gửi kèm mỗi câu (vài chục câu mỗi đề). Đặt luật
+ * dài ở đây thay vì ở đó tiết kiệm ~250.000 token input mỗi lần chạy.
+ */
 export function figureCheckPrompt(questionText: string): string {
   return [
     'Đây là hình minh hoạ vừa được dựng cho câu hỏi bên dưới.',
@@ -150,7 +151,14 @@ export function figureCheckPrompt(questionText: string): string {
     'Nếu CHƯA ĐẠT: trả về mã TikZ đã sửa, bắt đầu bằng \\begin{tikzpicture} và kết thúc' +
       ' bằng \\end{tikzpicture}, không kèm lời dẫn.',
     '',
-    tikzCapsRules(),
+    'Áp đúng quy ước của loại hình đang vẽ:',
+    figureRulesFor('khonggian'),
+    '',
+    'Nếu là BẢNG BIẾN THIÊN:',
+    figureRulesFor('bbt'),
+    '',
+    'Nếu là ĐỒ THỊ HÀM SỐ:',
+    figureRulesFor('dothi'),
   ].join('\n');
 }
 

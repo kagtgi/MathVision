@@ -204,6 +204,31 @@ hình vật thật, và áp đúng quy ước của loại đó. Nếu là hình
 hình bình hành, cạnh khuất nét đứt.`,
 };
 
+/**
+ * Bản NGẮN của luật vẽ, dùng cho prompt GIẢI ĐỀ.
+ *
+ * Vì sao phải có bản ngắn: `solvePrompt` được gửi kèm MỖI CÂU. Nhồi cả ba khối luật đầy đủ
+ * (bbt + dothi + khonggian) vào đó làm prompt phình từ ~700 lên ~4.800 token, nhân với vài
+ * chục câu mỗi đề là ~250.000 token input đổ đi mỗi lần chạy — trong khi phần lớn câu không
+ * vẽ hình nào. Luật đầy đủ chuyển sang lượt SOI LẠI HÌNH, lượt đó chỉ chạy cho câu thật sự
+ * có hình.
+ */
+export const FIGURE_STYLE_BRIEF = `QUY ƯỚC VẼ (bản ngắn — sẽ có luật đầy đủ ở bước soi lại):
+- Chỉ nét đen trên nền trắng, phẳng, không tô bóng/gradient/hiệu ứng 3D. Nét chính 0.7-0.9pt,
+  nét phụ 0.4-0.6pt. Mở đầu: \\begin{tikzpicture}[line cap=round, line join=round, >=Stealth]
+- Cạnh THẤY nét liền, cạnh BỊ CHE nét đứt. Đoạn chỉ bị che một phần thì CHIA ĐOẠN.
+- Nhãn đặt ngoài hình, không đè nét; tên điểm và công thức trong $...$. KHÔNG ghi số đo mà
+  đề không cho.
+- Hình KHÔNG GIAN: tự đặt toạ độ chiếu song song (không có thư viện perspective). Đáy chóp /
+  lăng trụ vẽ thành HÌNH BÌNH HÀNH, không vẽ thành hình chữ nhật nhìn thẳng.
+- BẢNG BIẾN THIÊN: kẻ tay bằng \\draw + \\node, ba hàng $x$ / $f'(x)$ / $f(x)$, mũi tên chéo
+  \\draw[->] giữa hai ô. Dấu $+$ thì mũi tên đi LÊN, dấu $-$ thì đi XUỐNG.
+- ĐỒ THỊ: hai trục có mũi tên và nhãn $x$, $y$, $O$; vẽ bằng
+  \\draw[domain=a:b,samples=100,smooth] plot (\\x,{...}); tiệm cận nét đứt; KHÔNG nối qua
+  điểm gián đoạn. Chỉ ghi mốc bài cần.
+- Trước khi vẽ, tự xác định: điểm nào nằm trên cạnh/mặt nào, giao điểm ở đâu, cạnh nào khuất.
+  Đừng thêm quan hệ song song / vuông góc mà đề không nói. KHÔNG xuất phần suy luận.`;
+
 /** Khối luật đầy đủ cho một loại hình, ghép sẵn theo đúng thứ tự. */
 export function figureRulesFor(kind: FigureCategory): string {
   return [CATEGORY_RULES[kind], '', SGK_STYLE_RULES, '', THINK_FIRST_RULES, '', tikzCapsRules()].join(

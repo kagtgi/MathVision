@@ -123,6 +123,47 @@ export default function ImageToWordConverter({ apiKey, models }: Props) {
     maxSize: MAX_FILE_SIZE,
   });
 
+  /**
+   * Dán ảnh bằng Ctrl+V — chụp Win+Shift+S rồi dán thẳng, khỏi phải lưu file trung gian.
+   *
+   * Nghe ở `document` chứ không phải ở vùng thả: focus thường nằm ở `<body>` nên listener
+   * gắn vào phần tử con sẽ không bao giờ nhận được sự kiện.
+   *
+   * Chỉ đi đường DOM, KHÔNG thêm IPC `clipboard.readImage()`: Chromium đã tự quy
+   * `CF_BITMAP`/`CF_DIB` (Snipping Tool, Paint) và `CF_HDROP` (copy file trong Explorer)
+   * thành `File` trong `clipboardData.files`, mà thêm IPC lại buộc sửa `electron/main.cjs`
+   * kéo theo phải build exe để chạy lại hai harness.
+   *
+   * HAI CHỐT, đúng thứ tự — chốt sau là để GIỮ CÔNG VIỆC, không phải giữ chữ:
+   *   1. lọc MIME trước, chỉ `preventDefault()` sau khi đã qua ⇒ dán chữ thành no-op hoàn
+   *      toàn, trình duyệt vẫn tự chèn chữ vào ô soạn thảo như thường;
+   *   2. bỏ qua khi con trỏ đang ở ô soạn thảo ⇒ một lần Ctrl+V lỡ tay lúc đang sửa MMD
+   *      không xoá sạch kết quả, vì `onDrop` reset `mmd`/`issues`/`notes`.
+   */
+  useEffect(() => {
+    const onPaste = (e: ClipboardEvent) => {
+      const img = Array.from(e.clipboardData?.files ?? []).find((f) =>
+        f.type.startsWith('image/'),
+      );
+      if (!img) return;
+      const target = e.target as HTMLElement | null;
+      if (target?.closest?.('textarea, input, [contenteditable]')) return;
+      if (busy) return;
+      e.preventDefault();
+      // Snipping Tool đặt tên `image.png` vô dụng; đặt tên theo giờ để file .docx ra tên
+      // phân biệt được. GIỮ phần mở rộng để MmdWorkbench cắt đi đúng như file thả vào.
+      const ext =
+        img.type === 'image/webp' ? 'webp' : img.type === 'image/jpeg' ? 'jpg' : 'png';
+      const t = new Date();
+      const hh = String(t.getHours()).padStart(2, '0');
+      const mm = String(t.getMinutes()).padStart(2, '0');
+      const ss = String(t.getSeconds()).padStart(2, '0');
+      onDrop([new File([img], `anh-dan-${hh}${mm}${ss}.${ext}`, { type: img.type })]);
+    };
+    document.addEventListener('paste', onPaste);
+    return () => document.removeEventListener('paste', onPaste);
+  }, [onDrop, busy]);
+
   /** Bản thu nhỏ để gửi API — vẫn đủ nét cho chữ nhỏ và chỉ số dưới. */
   const apiImageBase64 = (): string => {
     const src = fullResRef.current!;
@@ -244,7 +285,7 @@ export default function ImageToWordConverter({ apiKey, models }: Props) {
                 <input {...getInputProps()} />
                 <Upload className="w-5 h-5 mb-3" style={{ color: 'var(--ink-4)' }} />
                 <p className="text-[13.5px] font-medium" style={{ color: 'var(--ink-2)' }}>
-                  Thả ảnh vào đây
+                  Thả ảnh vào đây hoặc dán (Ctrl+V)
                 </p>
                 <p className="t-small mt-0.5">PNG · JPG · WebP — tối đa 20 MB</p>
               </div>

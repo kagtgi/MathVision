@@ -228,12 +228,21 @@ export interface KeyCheckResult {
   ok: boolean;
   chain: string[];
   available: string[];
+  /** Chỉ có khi key thật sự KHÔNG dùng được. */
   error?: string;
+  /** Key chưa bị phủ định, chỉ là lần này chưa xác nhận được (hết hạn mức, mạng chớp). */
+  warning?: string;
 }
 
 /**
  * Gọi models.list() để (a) xác nhận key dùng được, (b) loại khỏi chuỗi những model
  * mà tài khoản này không có. Tên model Google trả về dạng `models/gemini-...`.
+ *
+ * PHÂN BIỆT "key sai" với "lần này chưa hỏi được": bản trước gom MỌI lỗi thành `ok:false`,
+ * mà giao diện lại không cho vào app khi `!ok` — nên chỉ cần hết hạn mức hoặc mạng chớp một
+ * nhịp là người dùng bị báo "key không dùng được" và KHÔNG VÀO ĐƯỢC APP. Dùng lại đúng bộ
+ * phân loại lỗi sẵn có: chỉ 400/401/403 mới là key sai; 429 và lỗi mạng/5xx nghĩa là endpoint
+ * vẫn sống và key chưa bị chối, nên cho vào và chỉ cảnh báo.
  */
 export async function checkApiKey(apiKey: string): Promise<KeyCheckResult> {
   try {
@@ -248,6 +257,23 @@ export async function checkApiKey(apiKey: string): Promise<KeyCheckResult> {
     // Không nhận diện được model nào (API có thể không liệt kê hết) -> vẫn dùng chain gốc.
     return { ok: true, chain: chain.length ? chain : MODEL_CHAIN, available };
   } catch (err) {
+    const c = classify(err);
+    if (c.kind === 'rate-limit') {
+      return {
+        ok: true,
+        chain: MODEL_CHAIN,
+        available: [],
+        warning: 'Tài khoản đang hết hạn mức nên chưa dò được danh sách model — vẫn dùng key này.',
+      };
+    }
+    if (c.kind === 'transient' || c.kind === 'model-missing') {
+      return {
+        ok: true,
+        chain: MODEL_CHAIN,
+        available: [],
+        warning: 'Chưa hỏi được Google lần này (mạng hoặc phía Google) — vẫn dùng key này.',
+      };
+    }
     return { ok: false, chain: MODEL_CHAIN, available: [], error: humanError(err) };
   }
 }

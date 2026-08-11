@@ -21,6 +21,17 @@ contextBridge.exposeInMainWorld('mathvision', {
    */
   saveFile: (suggestedName, data) => ipcRenderer.invoke('mv:save-file', suggestedName, data),
 
+  /**
+   * Kho khoá. `enc` cho biết key đang được mã hoá hay còn dạng chữ thường — giao diện phải
+   * NÓI THẬT chuyện đó chứ không giả vờ đã mã hoá.
+   * @returns {Promise<{ok:boolean, key:string, enc:'safeStorage'|'plain'|'none',
+   *   encryptionAvailable:boolean, models?:string[], path?:string}>}
+   */
+  getApiKey: () => ipcRenderer.invoke('mv:key-get'),
+  /** @param {string} key @param {string[]=} models chuỗi model đã lọc, để khỏi dò lại mỗi lần mở */
+  setApiKey: (key, models) => ipcRenderer.invoke('mv:key-set', key, models),
+  clearApiKey: () => ipcRenderer.invoke('mv:key-clear'),
+
   /** @returns {Promise<string>} phiên bản đang chạy, ví dụ "1.1.0" */
   getVersion: () => ipcRenderer.invoke('mv:get-version'),
 

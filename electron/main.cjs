@@ -5,6 +5,7 @@ const fs = require('fs');
 const path = require('path');
 
 const { createUpdater } = require('./updater.cjs');
+const { setupSecretStore } = require('./secrets.cjs');
 
 // PHẢI gọi trước mọi `app.getPath('userData')`. Không gọi thì `app.name` rơi về
 // `"name": "math-vision"` trong package.json, còn bản electron-builder dùng `productName`
@@ -175,6 +176,8 @@ app.whenReady().then(() => {
 
   setupFileSaving();
   setupDownloads();
+  // Sau whenReady: `safeStorage.isEncryptionAvailable()` gọi sớm hơn sẽ trả sai.
+  setupSecretStore();
   createWindow();
   setupUpdates();
 });

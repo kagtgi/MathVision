@@ -6,16 +6,24 @@
  */
 
 import { useEffect, useState } from 'react';
-import { ArrowRight, FileText, Image as ImageIcon, Loader2 } from 'lucide-react';
+import {
+  ArrowRight,
+  FileText,
+  Image as ImageIcon,
+  Loader2,
+  Settings as SettingsIcon,
+} from 'lucide-react';
 
 import ImageToWordConverter from './ImageToWordConverter';
 import PdfToDocxConverter from './PdfToDocxConverter';
 import UpdateToast, { useAppVersion } from './components/UpdateToast';
+import SettingsPanel from './components/SettingsPanel';
+import { clearKey, loadKey, saveKey } from './key/keyStore';
 import { checkApiKey, MODEL_CHAIN } from './pipeline/geminiClient';
 
 type AppMode = 'image-to-word' | 'pdf-to-word';
 
-const KEY_STORAGE = 'mathvision.apiKey';
+// Key không còn đọc/ghi trực tiếp ở đây nữa — xem `src/key/keyStore.ts`.
 
 export default function App() {
   const [apiKey, setApiKey] = useState('');
@@ -24,15 +32,45 @@ export default function App() {
   const [keyError, setKeyError] = useState<string | null>(null);
   const [models, setModels] = useState<string[]>(MODEL_CHAIN);
   const [mode, setMode] = useState<AppMode>('pdf-to-word');
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [storage, setStorage] = useState<{
+    enc: KeyEnc;
+    encryptionAvailable: boolean;
+    path?: string;
+  }>({ enc: 'none', encryptionAvailable: false });
+  const [migrateWarn, setMigrateWarn] = useState(false);
   const version = useAppVersion();
 
-  // Key đã lưu thì vào thẳng; không gọi mạng lúc khởi động cho nhanh.
+  /**
+   * Key đã lưu thì vào thẳng; không gọi mạng lúc khởi động cho nhanh.
+   *
+   * `loadKey()` lo luôn việc chuyển key cũ từ `localStorage` sang kho mã hoá, theo luật
+   * ghi-trước-xoá-sau. Chuyển hỏng thì vẫn cho vào app và chỉ cảnh báo — không bao giờ để
+   * người dùng mất key.
+   *
+   * Khôi phục cả `models`: bản trước không lưu nên mỗi lần mở app chuỗi model lại về mặc
+   * định, và tài khoản nào không có model đầu chuỗi thì MỖI TRANG OCR và mỗi lượt giải đều
+   * tốn một vòng 404 trước khi hạ model.
+   */
   useEffect(() => {
-    const saved = localStorage.getItem(KEY_STORAGE);
-    if (saved) {
-      setApiKey(saved);
-      setUnlocked(true);
-    }
+    let cancelled = false;
+    void loadKey().then((res) => {
+      if (cancelled) return;
+      setStorage({
+        enc: res.enc,
+        encryptionAvailable: res.encryptionAvailable,
+        path: res.path,
+      });
+      if (res.migrationFailed) setMigrateWarn(true);
+      if (res.models?.length) setModels(res.models);
+      if (res.key) {
+        setApiKey(res.key);
+        setUnlocked(true);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const submitKey = async () => {
@@ -47,15 +85,28 @@ export default function App() {
       return;
     }
     setModels(result.chain);
-    localStorage.setItem(KEY_STORAGE, key);
+    // Lưu kèm chuỗi model đã lọc, chỉ khi thật sự dò được danh sách.
+    const saved = await saveKey(key, result.available.length ? result.chain : undefined);
+    setStorage((s) => ({ ...s, enc: saved.enc }));
     setUnlocked(true);
   };
 
   const forgetKey = () => {
-    localStorage.removeItem(KEY_STORAGE);
+    void clearKey();
     setApiKey('');
+    setModels(MODEL_CHAIN); // đừng để chuỗi đã lọc của key cũ sống sang key mới
     setUnlocked(false);
     setKeyError(null);
+    setStorage((s) => ({ ...s, enc: 'none' }));
+  };
+
+  const onKeyChange = (key: string, nextModels?: string[]) => {
+    setApiKey(key);
+    if (nextModels?.length) setModels(nextModels);
+    setMigrateWarn(false);
+    void loadKey().then((res) =>
+      setStorage({ enc: res.enc, encryptionAvailable: res.encryptionAvailable, path: res.path }),
+    );
   };
 
   if (!unlocked) {
@@ -174,11 +225,40 @@ export default function App() {
               v{version}
             </span>
           )}
-          <button onClick={forgetKey} className="btn btn-text">
-            Đổi key
+          <button
+            onClick={() => setSettingsOpen(true)}
+            className="btn btn-text"
+            title="Key và cách lưu key"
+          >
+            <SettingsIcon className="w-3.5 h-3.5" />
+            Cài đặt
           </button>
         </div>
       </header>
+
+      {migrateWarn && (
+        <div
+          className="shrink-0 px-5 py-2 flex items-center gap-2"
+          style={{ background: '#fef7e0' }}
+        >
+          <p className="text-[12.5px] flex-1" style={{ color: 'var(--warn)' }}>
+            Chưa chuyển được key sang kho mã hoá — key vẫn đang lưu dạng văn bản thường.
+          </p>
+          <button onClick={() => setSettingsOpen(true)} className="btn btn-text btn-sm">
+            Mở Cài đặt
+          </button>
+        </div>
+      )}
+
+      <SettingsPanel
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        apiKey={apiKey}
+        storage={storage}
+        onKeyChange={onKeyChange}
+        onForget={forgetKey}
+        version={version}
+      />
 
       <UpdateToast />
 

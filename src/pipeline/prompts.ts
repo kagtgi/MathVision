@@ -11,6 +11,7 @@
  */
 
 import { ANTI_HALLUCINATION, LATEX_MATH_RULES } from '../utils/sharedPrompts.ts';
+import { CATEGORY_HINTS, type FigureCategory } from '../utils/figurePrompts.ts';
 
 /** Ví dụ mẫu trích từ đề đã xử lý đạt chuẩn (MMD KTTX/11CA2_KTTX3_HK1.mmd). */
 const GOLD_EXAMPLE = String.raw`PHẦN I. CÂU TRẮC NGHIỆM NHIỀU PHƯƠNG ÁN LỰA CHỌN
@@ -91,10 +92,13 @@ trí) — xuất ĐÚNG MỘT DÒNG tại đúng vị trí trong mạch đọc:
 với x,y là góc trên trái, w,h là kích thước, tất cả tính theo PHẦN TRĂM của ảnh trang
 này (một chữ số thập phân); K đánh số 1,2,3... theo thứ tự đọc trong trang.
 
-<loại> chỉ nhận một trong hai giá trị:
-  ve   — hình VẼ bằng nét: hình học phẳng/không gian, đồ thị hàm số, trục số, bảng biến
-         thiên, biểu đồ cột/tròn/đường, sơ đồ. Đây là mặc định khi phân vân.
-  anh  — ẢNH CHỤP vật thật: ảnh chụp đồ vật, công trình, người, bản đồ ảnh, ảnh màn hình.
+<loại> nhận một trong các giá trị sau — chọn đúng loại thì hình mới được vẽ lại theo
+đúng quy ước của loại đó:
+${CATEGORY_HINTS}
+  ve         — hình vẽ nét nhưng không chắc thuộc loại nào. Dùng khi phân vân.
+
+Riêng bảng số liệu (kind=bang) thì ĐỪNG xuất dòng hình: hãy gõ thành bảng markdown như
+mọi bảng khác, vì bảng chữ trong Word sửa được còn ảnh thì không.
 
 BBOX PHẢI ÔM SÁT hình: chỉ gồm nét vẽ và nhãn TRÊN hình (tên điểm, số trên trục). TUYỆT
 ĐỐI không trùm sang chữ của đề, phương án A-D, hay số câu ở trên/dưới hình. Thà cắt hơi
@@ -165,7 +169,22 @@ export function continuationPrompt(soFar: string): string {
 
 // ─── Bóc hình + bbox ─────────────────────────────────────────────────────────
 
-export type FigureKind = 've' | 'anh';
+/**
+ * Loại hình quyết định (a) có dựng lại bằng TikZ không, (b) dùng khối luật vẽ nào.
+ * Trước 1.2.0 chỉ có `ve` và `anh`; hai giá trị đó vẫn đọc được từ MMD cũ.
+ */
+export type FigureKind = FigureCategory;
+
+const FIGURE_KINDS: readonly string[] = [
+  'bbt',
+  'dothi',
+  'khonggian',
+  'phang',
+  'model',
+  'bang',
+  'anh',
+  've',
+];
 
 export interface FigureRef {
   id: string;
@@ -189,12 +208,21 @@ const FIG_LINE =
   /!\[[^\]]*\]\(\s*#?([\w-]+)\s*\)\s*\{([^}]*bbox\s*[:=]\s*([\d.]+)\s*[,;]\s*([\d.]+)\s*[,;]\s*([\d.]+)\s*[,;]\s*([\d.]+)[^}]*)\}/g;
 
 /**
- * Đọc loại hình từ chuỗi thuộc tính. CHỈ khi model nói rõ là ảnh chụp mới trả `anh`;
- * mọi trường hợp khác (kể cả thiếu thuộc tính) đều là hình vẽ, vì đề toán gần như chỉ
- * có hình vẽ và người dùng muốn ưu tiên dựng lại bằng TikZ.
+ * Đọc loại hình từ chuỗi thuộc tính.
+ *
+ * Fail-open về `ve` (hình vẽ chưa rõ loại): thiếu thuộc tính hoặc khai tên lạ thì vẫn dựng
+ * lại bằng TikZ, vì đề toán gần như chỉ có hình vẽ. CHỈ khi model nói rõ là ảnh chụp mới trả
+ * `anh` — vẽ lại một ảnh chụp là bịa nội dung.
+ *
+ * `ve`/`anh` là hai giá trị của MMD trước 1.2.0, vẫn phải đọc được.
  */
 function kindOf(attrs: string): FigureKind {
-  return /\b(?:kind|loai|loại)\s*[:=]\s*(?:anh|ảnh|photo|image)\b/i.test(attrs) ? 'anh' : 've';
+  const m = attrs.match(/\b(?:kind|loai|loại)\s*[:=]\s*([\w]+)/i);
+  const raw = (m?.[1] ?? '').toLowerCase();
+  if (/^(anh|photo|image)$/.test(raw)) return 'anh';
+  if (raw === 'ảnh') return 'anh';
+  if (FIGURE_KINDS.includes(raw as FigureKind)) return raw as FigureKind;
+  return 've';
 }
 
 const FIG_LINE_NO_BBOX = /^\s*!\[[^\]]*\]\(\s*#[\w-]+\s*\)\s*$/;
@@ -229,13 +257,24 @@ export function extractFigures(mmd: string): {
   const jsonTail = text.match(/```json\s*(\{[\s\S]*?"figures"[\s\S]*?\})\s*```/);
   if (jsonTail) {
     try {
-      const parsed = JSON.parse(jsonTail[1]) as { figures?: Array<{ id?: string; bbox?: number[] }> };
+      const parsed = JSON.parse(jsonTail[1]) as {
+        figures?: Array<{ id?: string; bbox?: number[]; kind?: string; loai?: string }>;
+      };
       for (const f of parsed.figures ?? []) {
         const id = String(f.id ?? '').replace(/^#/, '');
         const b = f.bbox;
         if (!id || !Array.isArray(b) || b.length !== 4) continue;
+        // Lọc id đúng như đường chính (`FIG_LINE` giới hạn `[\w-]+`). Nhánh này trước đây
+        // nhận MỌI chuỗi, nên id chứa `)` thì `FIG_LINE_NO_BBOX` và regex ảnh ở `qc.ts`
+        // không khớp lại được, còn id chứa `..\` thì thành đường dẫn khi đem đặt tên file.
+        if (!/^[\w-]+$/.test(id)) {
+          warnings.push(`Hình "${id}" trong khối JSON có id không hợp lệ — đã bỏ qua.`);
+          continue;
+        }
         if (figures.some((x) => x.id === id)) continue;
-        figures.push({ id, bbox: [b[0], b[1], b[2], b[3]], kind: 've' });
+        // Đọc `kind` nếu model có khai: hardcode 've' làm ảnh chụp vật thật bị vẽ lại bằng
+        // TikZ, đúng ca "vẽ lại là bịa nội dung".
+        figures.push({ id, bbox: [b[0], b[1], b[2], b[3]], kind: kindOf(`kind=${f.kind ?? f.loai ?? 've'}`) });
       }
       text = text.replace(jsonTail[0], '').trimEnd();
     } catch {

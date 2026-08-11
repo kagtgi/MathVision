@@ -295,9 +295,42 @@ const UNIT_TESTS = [
     expect: [{ id: 'p1_f1', bbox: [1, 2, 30, 40], kind: 'anh' }],
   },
   {
-    name: 'figures: kind=ve -> hình vẽ',
+    name: 'figures: kind=ve -> hình vẽ (giá trị của MMD trước 1.2.0, vẫn phải đọc được)',
     run: () => extractFigures('![](#p1_f1){bbox=1,2,30,40,kind=ve}').figures,
     expect: [{ id: 'p1_f1', bbox: [1, 2, 30, 40], kind: 've' }],
+  },
+  // Từ 1.2.0 loại hình chia nhỏ để chọn đúng khối luật vẽ — bảng biến thiên và đồ thị cần
+  // luật khác hẳn hình không gian.
+  {
+    name: 'figures: đọc được năm loại hình mới',
+    run: () =>
+      ['bbt', 'dothi', 'khonggian', 'phang', 'model'].map(
+        (k) => extractFigures(`![](#p1_f1){bbox=1,2,3,4,kind=${k}}`).figures[0].kind,
+      ),
+    expect: ['bbt', 'dothi', 'khonggian', 'phang', 'model'],
+  },
+  {
+    name: 'figures: kind lạ -> rơi về ve, vẫn dựng lại được',
+    run: () => extractFigures('![](#p1_f1){bbox=1,2,3,4,kind=biểu-đồ-lạ}').figures[0].kind,
+    expect: 've',
+  },
+  {
+    name: 'figures: nhánh JSON dự phòng đọc kind chứ không hardcode ve',
+    run: () => {
+      const mmd =
+        'X\n```json\n{"figures":[{"id":"p1_f9","bbox":[1,2,3,4],"kind":"anh"}]}\n```';
+      return extractFigures(mmd).figures;
+    },
+    expect: [{ id: 'p1_f9', bbox: [1, 2, 3, 4], kind: 'anh' }],
+  },
+  {
+    name: 'figures: nhánh JSON dự phòng lọc id không hợp lệ',
+    run: () => {
+      const mmd = 'X\n```json\n{"figures":[{"id":"../evil","bbox":[1,2,3,4]}]}\n```';
+      const r = extractFigures(mmd);
+      return { n: r.figures.length, warn: r.warnings.length };
+    },
+    expect: { n: 0, warn: 1 },
   },
   {
     name: 'figures: thiếu kind -> mặc định hình vẽ (ưu tiên TikZ)',

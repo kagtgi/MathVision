@@ -7,8 +7,15 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useDropzone } from 'react-dropzone';
-import { AlertCircle, Image as ImageIcon, Loader2, Upload, X } from 'lucide-react';
+import { useDropzone, type FileRejection } from 'react-dropzone';
+import {
+  AlertCircle,
+  History as HistoryIcon,
+  Image as ImageIcon,
+  Loader2,
+  Upload,
+  X,
+} from 'lucide-react';
 
 import MmdWorkbench from './components/MmdWorkbench';
 import OptionToggles, { type PipelineToggles } from './components/OptionToggles';
@@ -18,6 +25,9 @@ import { ocrPage } from './pipeline/ocr';
 import { recheck, runTextPipeline } from './pipeline/runPipeline';
 import type { QcIssue } from './pipeline/qc';
 import { tikzToImage } from './utils/latexToImage';
+import * as historyStore from './history/store';
+import type { RestoredConversion } from './history/store';
+import { canvasThumbJpeg } from './history/thumb';
 
 const MAX_FILE_SIZE = 20 * 1024 * 1024;
 const API_MAX_DIM = 2048;
@@ -26,9 +36,15 @@ const API_JPEG_QUALITY = 0.85;
 interface Props {
   apiKey: string;
   models?: string[];
+  /** Mục lịch sử vừa được mở lại; `restoreSeq` tăng mỗi lần mở để effect chạy lại. */
+  restore?: RestoredConversion | null;
+  restoreSeq?: number;
 }
 
-export default function ImageToWordConverter({ apiKey, models }: Props) {
+export default function ImageToWordConverter({ apiKey, models, restore, restoreSeq }: Props) {
+  /** Tên nguồn để đặt tên .docx — mục mở lại từ lịch sử không có `File` nào. */
+  const [sourceName, setSourceName] = useState('de-thi');
+  const [restoredFrom, setRestoredFrom] = useState<{ fileName: string; at: number } | null>(null);
   const [file, setFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -56,6 +72,9 @@ export default function ImageToWordConverter({ apiKey, models }: Props) {
   const fullResRef = useRef<HTMLCanvasElement | null>(null);
   const figuresRef = useRef<FigureMap>(new Map());
   const abortRef = useRef<AbortController | null>(null);
+  const historyIdRef = useRef<string | null>(null);
+  const saveTimerRef = useRef<number | null>(null);
+  const thumbRef = useRef<Uint8Array | undefined>(undefined);
 
   useEffect(() => () => abortRef.current?.abort(), []);
 
@@ -71,11 +90,18 @@ export default function ImageToWordConverter({ apiKey, models }: Props) {
       return;
     }
     setFile(f);
+    setSourceName(f.name);
+    setRestoredFrom(null);
+    historyIdRef.current = null;
     setError(null);
     setMmd('');
     setIssues([]);
     setNotes([]);
     setLog([]);
+    // `disagreements` là kết quả của LƯỢT CHẠY, không được sống qua ảnh mới: `onMmdChange`
+    // truyền nó lại vào `recheck`, nên thiếu dòng này là cảnh báo "hai lượt giải cho kết quả
+    // khác nhau" của ảnh trước rò sang tài liệu mới.
+    setDisagreements([]);
     figuresRef.current = new Map();
     setFigures(new Map());
 
@@ -87,17 +113,80 @@ export default function ImageToWordConverter({ apiKey, models }: Props) {
         canvas.getContext('2d')?.drawImage(bitmap, 0, 0);
         bitmap.close();
         fullResRef.current = canvas;
+        // Ảnh nhỏ cho lịch sử: ở chế độ ảnh thì `fullResRef` bền nên chụp ngay đây được.
+        void canvasThumbJpeg(canvas).then((t) => (thumbRef.current = t));
         setPreviewUrl(canvas.toDataURL('image/jpeg', 0.7));
       })
       .catch(() => setError('Không đọc được ảnh. Dùng file PNG, JPG hoặc WebP.'));
   }, []);
 
+  /**
+   * File bị react-dropzone loại thì `onDrop` nhận mảng RỖNG, nên câu báo dung lượng ở trên
+   * không bao giờ hiện khi người dùng THẢ file quá cỡ — họ thả xong và không thấy gì.
+   * (Đường dán Ctrl+V gọi `onDrop` trực tiếp nên nó lại chạm được câu báo đó.)
+   */
+  const onDropRejected = useCallback((rejections: FileRejection[]) => {
+    const codes = new Set(rejections.flatMap((r) => r.errors.map((e) => e.code)));
+    if (codes.has('file-too-large')) {
+      const mb = (rejections[0].file.size / 1024 / 1024).toFixed(1);
+      setError(`Ảnh nặng ${mb} MB, vượt mức 20 MB.`);
+    } else if (codes.has('file-invalid-type')) {
+      setError('Chỉ nhận ảnh PNG, JPG hoặc WebP.');
+    } else if (codes.has('too-many-files')) {
+      setError('Mỗi lần chỉ xử lý được một ảnh.');
+    } else {
+      setError('Không nhận được ảnh này.');
+    }
+  }, []);
+
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
+    onDropRejected,
     accept: { 'image/*': ['.png', '.jpg', '.jpeg', '.webp'] },
     maxFiles: 1,
     maxSize: MAX_FILE_SIZE,
   });
+
+  /**
+   * Dán ảnh bằng Ctrl+V — chụp Win+Shift+S rồi dán thẳng, khỏi phải lưu file trung gian.
+   *
+   * Nghe ở `document` chứ không phải ở vùng thả: focus thường nằm ở `<body>` nên listener
+   * gắn vào phần tử con sẽ không bao giờ nhận được sự kiện.
+   *
+   * Chỉ đi đường DOM, KHÔNG thêm IPC `clipboard.readImage()`: Chromium đã tự quy
+   * `CF_BITMAP`/`CF_DIB` (Snipping Tool, Paint) và `CF_HDROP` (copy file trong Explorer)
+   * thành `File` trong `clipboardData.files`, mà thêm IPC lại buộc sửa `electron/main.cjs`
+   * kéo theo phải build exe để chạy lại hai harness.
+   *
+   * HAI CHỐT, đúng thứ tự — chốt sau là để GIỮ CÔNG VIỆC, không phải giữ chữ:
+   *   1. lọc MIME trước, chỉ `preventDefault()` sau khi đã qua ⇒ dán chữ thành no-op hoàn
+   *      toàn, trình duyệt vẫn tự chèn chữ vào ô soạn thảo như thường;
+   *   2. bỏ qua khi con trỏ đang ở ô soạn thảo ⇒ một lần Ctrl+V lỡ tay lúc đang sửa MMD
+   *      không xoá sạch kết quả, vì `onDrop` reset `mmd`/`issues`/`notes`.
+   */
+  useEffect(() => {
+    const onPaste = (e: ClipboardEvent) => {
+      const img = Array.from(e.clipboardData?.files ?? []).find((f) =>
+        f.type.startsWith('image/'),
+      );
+      if (!img) return;
+      const target = e.target as HTMLElement | null;
+      if (target?.closest?.('textarea, input, [contenteditable]')) return;
+      if (busy) return;
+      e.preventDefault();
+      // Snipping Tool đặt tên `image.png` vô dụng; đặt tên theo giờ để file .docx ra tên
+      // phân biệt được. GIỮ phần mở rộng để MmdWorkbench cắt đi đúng như file thả vào.
+      const ext =
+        img.type === 'image/webp' ? 'webp' : img.type === 'image/jpeg' ? 'jpg' : 'png';
+      const t = new Date();
+      const hh = String(t.getHours()).padStart(2, '0');
+      const mm = String(t.getMinutes()).padStart(2, '0');
+      const ss = String(t.getSeconds()).padStart(2, '0');
+      onDrop([new File([img], `anh-dan-${hh}${mm}${ss}.${ext}`, { type: img.type })]);
+    };
+    document.addEventListener('paste', onPaste);
+    return () => document.removeEventListener('paste', onPaste);
+  }, [onDrop, busy]);
 
   /** Bản thu nhỏ để gửi API — vẫn đủ nét cho chữ nhỏ và chỉ số dưới. */
   const apiImageBase64 = (): string => {
@@ -121,6 +210,11 @@ export default function ImageToWordConverter({ apiKey, models }: Props) {
     setError(null);
     setMmd('');
     setLog([]);
+    // Dọn đầu vòng như bên PDF. Thiếu ba dòng này thì chạy lại lần hai còn `issues`,
+    // `disagreements` và `figuresRef` của lượt trước.
+    setIssues([]);
+    setDisagreements([]);
+    figuresRef.current = new Map();
 
     try {
       setStage('Đang đọc ảnh…');
@@ -185,6 +279,24 @@ export default function ImageToWordConverter({ apiKey, models }: Props) {
       setDisagreements(result.disagreements);
       setStage('');
       setProgress(null);
+
+      // Chỉ lưu khi chạy xong trọn vẹn — MMD dở dang trong danh sách còn tệ hơn không có.
+      if (!controller.signal.aborted) {
+        historyIdRef.current = await historyStore.save({
+          mode: 'image-to-word',
+          fileName: file.name,
+          pageCount: 1,
+          mmd: result.mmd,
+          notes: [...warnings, ...result.notes],
+          issues: result.issues,
+          disagreements: result.disagreements,
+          wordOptions,
+          toggles,
+          figures: figuresRef.current,
+          thumb: thumbRef.current,
+          meta: { models },
+        });
+      }
     } catch (err) {
       if (!controller.signal.aborted) {
         setError(err instanceof Error ? err.message : 'Lỗi không xác định.');
@@ -196,8 +308,49 @@ export default function ImageToWordConverter({ apiKey, models }: Props) {
 
   const onMmdChange = (next: string) => {
     setMmd(next);
-    setIssues(recheck(next, new Set(figuresRef.current.keys()), disagreements));
+    const nextIssues = recheck(next, new Set(figuresRef.current.keys()), disagreements);
+    setIssues(nextIssues);
+    const id = historyIdRef.current;
+    if (!id) return;
+    // Chỉ ghi lại entry.json, KHÔNG đụng figures/ — xem ghi chú ở PdfToDocxConverter.
+    if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = window.setTimeout(() => {
+      void historyStore.update(id, { mmd: next, issues: nextIssues, wordOptions });
+    }, 3000);
   };
+
+  useEffect(() => {
+    const id = historyIdRef.current;
+    if (!id || !mmd) return;
+    void historyStore.update(id, { mmd, issues, wordOptions });
+  }, [wordOptions]);
+
+  useEffect(
+    () => () => {
+      if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
+    },
+    [],
+  );
+
+  /** Nhận mục mở lại từ lịch sử — ba chỗ dễ sai giải thích ở PdfToDocxConverter. */
+  useEffect(() => {
+    if (!restore || restore.mode !== 'image-to-word') return;
+    figuresRef.current = restore.figures;
+    setFigures(new Map(restore.figures));
+    setDisagreements(restore.disagreements);
+    setIssues(restore.issues);
+    setNotes(restore.notes);
+    setWordOptions(restore.wordOptions);
+    setToggles(restore.toggles);
+    setSourceName(restore.fileName);
+    setFile(null);
+    setPreviewUrl(null);
+    fullResRef.current = null;
+    setError(null);
+    setMmd(restore.mmd);
+    historyIdRef.current = restore.id;
+    setRestoredFrom({ fileName: restore.fileName, at: restore.createdAt });
+  }, [restoreSeq]);
 
   return (
     <div className="flex-1 flex overflow-hidden min-h-0">
@@ -215,7 +368,7 @@ export default function ImageToWordConverter({ apiKey, models }: Props) {
                 <input {...getInputProps()} />
                 <Upload className="w-5 h-5 mb-3" style={{ color: 'var(--ink-4)' }} />
                 <p className="text-[13.5px] font-medium" style={{ color: 'var(--ink-2)' }}>
-                  Thả ảnh vào đây
+                  Thả ảnh vào đây hoặc dán (Ctrl+V)
                 </p>
                 <p className="t-small mt-0.5">PNG · JPG · WebP — tối đa 20 MB</p>
               </div>
@@ -243,6 +396,26 @@ export default function ImageToWordConverter({ apiKey, models }: Props) {
           </div>
 
           <OptionToggles value={toggles} onChange={setToggles} disabled={busy} hideRedraw />
+
+          {restoredFrom && (
+            <div className="card p-2.5 flex items-start gap-2">
+              <HistoryIcon className="w-3.5 h-3.5 mt-0.5 shrink-0" style={{ color: 'var(--accent)' }} />
+              <div className="flex-1 min-w-0">
+                <p className="text-[12.5px] truncate">Mở lại: {restoredFrom.fileName}</p>
+                <p className="t-small">
+                  {new Date(restoredFrom.at).toLocaleString('vi-VN')} · xuất Word được, chạy lại
+                  thì cần thả ảnh gốc
+                </p>
+              </div>
+              <button
+                onClick={() => setRestoredFrom(null)}
+                style={{ color: 'var(--ink-4)' }}
+                aria-label="Đóng"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
 
           {/* Chọn trước khi chạy; đổi lại được ở thanh công cụ khu làm việc. */}
           <WordOptions
@@ -325,7 +498,7 @@ export default function ImageToWordConverter({ apiKey, models }: Props) {
           issues={issues}
           notes={notes}
           figures={figures}
-          fileName={file?.name ?? 'de-thi'}
+          fileName={sourceName}
           busy={busy}
           wordOptions={wordOptions}
           onWordOptionsChange={setWordOptions}

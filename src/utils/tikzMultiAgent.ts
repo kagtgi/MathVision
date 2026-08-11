@@ -11,7 +11,7 @@
  * only Draft B + Verify are needed — saving one full API round-trip.
  */
 
-import { TIKZJAX_COMPAT_RULES } from './sharedPrompts';
+import { figureRulesFor, type FigureCategory } from './figurePrompts.ts';
 import {
   callGemini,
   TEMP_CREATIVE,
@@ -39,82 +39,78 @@ export interface TikzProgressCallback {
 
 // ─── Prompts ─────────────────────────────────────────────────────────────────
 
-const DRAFT_B_PROMPT = `You are a TikZ expert. Look at this image of a geometric figure carefully.
+/**
+ * Prompt vẽ lại một hình đã có, theo LOẠI hình.
+ *
+ * Bản trước dùng đúng một prompt nói "a geometric figure" kèm template tam giác cho MỌI hình
+ * — kể cả bảng biến thiên và đồ thị hàm số. Giờ luật riêng theo loại nằm ở `figurePrompts.ts`.
+ *
+ * Template dưới đây bỏ hai dòng `% Required: \usepackage{tikz}` của bản cũ: chúng là comment
+ * nên vô tác dụng, mà lại dạy model viết `\usepackage` — thứ làm chết hình nếu nó bỏ dấu `%`.
+ */
+const draftPrompt = (kind: FigureCategory) => `Bạn là chuyên gia TikZ. Nhìn kỹ ảnh hình vẽ này.
 
-Write COMPLETE, COMPILABLE TikZ code that faithfully reproduces the figure.
+Viết mã TikZ ĐẦY ĐỦ, DỰNG ĐƯỢC, tái hiện đúng hình trong ảnh.
 
-TEMPLATE — follow this structure:
-% Required: \\usepackage{tikz}
-% \\usetikzlibrary{angles, quotes, calc, arrows.meta, decorations.markings}
-
-\\begin{tikzpicture}[scale=1]
-  \\coordinate (A) at (x, y);
+KHUÔN mã:
+\\begin{tikzpicture}[line cap=round, line join=round, >=Stealth]
+  \\coordinate (A) at (0,0);
   \\draw[thick] (A) -- (B) -- (C) -- cycle;
-  \\pic[draw, angle radius=8pt] {angle = C--B--A};
-  \\pic[draw] {right angle = A--H--B};
-  \\draw[decoration={markings, mark=at position 0.5 with {\\draw (0,-2pt) -- (0,2pt);}}, postaction={decorate}] (A) -- (B);
+  \\draw[dashed] (B) -- (H);
+  \\pic[draw, angle radius=8pt] {right angle = A--H--B};
   \\fill (A) circle (1.5pt); \\node[below left] at (A) {$A$};
 \\end{tikzpicture}
 
-RULES:
-1. Define \\coordinate for EVERY named point BEFORE using it.
-2. \\fill + \\node for every labeled point. All math in $...$
-3. [thick] for main edges, [dashed] for construction lines.
-4. angles library for arcs, right angle for 90° marks, decorations.markings for tick marks.
-5. Coordinates in [0,6]×[0,6]. Match the image proportions.
-6. Only libraries you use. Must compile with pdflatex.
-7. Include EVERY visible element. Do NOT add anything not in the image.
-${TIKZJAX_COMPAT_RULES}
-Output ONLY the TikZ code. No explanation, no markdown fences.`;
+LUẬT MÃ:
+1. Khai \\coordinate cho MỌI điểm có tên TRƯỚC khi dùng nó.
+2. Mỗi điểm có nhãn thì \\fill một chấm và \\node một nhãn. Mọi ký hiệu toán trong $...$.
+3. Đưa vào ĐỦ mọi thành phần thấy trong ảnh. KHÔNG thêm gì không có trong ảnh.
+4. Chỉ khai \\usetikzlibrary những thư viện thật sự dùng.
 
-const VERIFY_FIX_PROMPT = `You are a TikZ quality verifier. You receive:
-1. The original image of a geometric figure
-2. Two candidate TikZ code drafts
+${figureRulesFor(kind)}
 
-PART 1 — VERIFY (step by step):
-a) Compare each draft against the original image element by element.
-b) Check each draft for compilation errors:
-   - Any \\coordinate used before being defined?
-   - Any undefined macros or missing libraries?
-   - Syntax errors (unmatched braces, missing semicolons)?
-c) Compare proportions: which draft better matches the image layout?
+CHỈ xuất mã TikZ. Không giải thích, không bọc trong dấu \`\`\`.`;
 
-PART 2 — OUTPUT:
-Produce the FINAL TikZ code. You may:
-- Pick the better draft as-is if correct
-- Merge best parts from both
-- Fix any errors found
+const verifyPrompt = (kind: FigureCategory) => `Bạn là người soát chất lượng mã TikZ. Bạn nhận:
+1. ảnh hình gốc,
+2. một hoặc hai bản mã TikZ ứng viên.
 
-Your response MUST have exactly this format:
+PHẦN 1 — SOÁT, từng bước:
+a) So từng thành phần của mỗi bản với ảnh gốc: thiếu gì, thêm gì?
+b) Tìm lỗi làm mã không dựng được:
+   - \\coordinate nào dùng trước khi khai?
+   - macro hay thư viện nào không tồn tại?
+   - ngoặc lệch, thiếu dấu chấm phẩy?
+c) So tỉ lệ: bản nào giống bố cục ảnh hơn?
+
+PHẦN 2 — XUẤT:
+Trả về mã TikZ CUỐI. Được phép: lấy nguyên bản tốt hơn, ghép phần hay của cả hai, hoặc sửa
+lỗi tìm thấy. Chỉ có một bản ứng viên thì soát và sửa chính bản đó.
+
+Định dạng trả lời PHẢI đúng như sau:
 
 REASONING:
-(your step-by-step analysis — be specific, reference exact lines)
+(phân tích từng bước, nói rõ ở dòng nào)
 
 FINAL_CODE:
-% Required: \\usepackage{tikz}
-% \\usetikzlibrary{...}
-
-\\begin{tikzpicture}[scale=1]
+\\begin{tikzpicture}[line cap=round, line join=round, >=Stealth]
 ...
 \\end{tikzpicture}
 
-Rules:
-- FINAL_CODE must be complete and compile with pdflatex.
-- Every element visible in the image must be present.
-- Do not add elements not in the image.
-- Do not hallucinate labels, points, or decorations not in the image.
-- If both drafts miss a visible element, add it.
-- If both drafts include something NOT in the image, remove it.
-${TIKZJAX_COMPAT_RULES}
+Luật:
+- Mọi thành phần thấy trong ảnh phải có mặt.
+- KHÔNG thêm thành phần không có trong ảnh. KHÔNG bịa nhãn, điểm, dấu trang trí.
+- Cả hai bản đều thiếu một thứ thấy trong ảnh thì thêm vào.
+- Cả hai bản đều có thứ KHÔNG có trong ảnh thì bỏ ra.
 
-COMPILATION CHECKLIST — verify ALL before outputting FINAL_CODE:
-□ Every \\coordinate used is defined BEFORE first use (order matters)
-□ All \\usetikzlibrary entries are actually used in the code
-□ No PGF math functions (sqrt, sin, cos, pi) — all values pre-computed to decimals
-□ All node labels with math are wrapped in $...$, braces balanced
-□ \\pic angle references (C--B--A) use only defined coordinate names
-□ No unsupported commands: \\pgfmathsetmacro, \\foreach, \\draw plot, \\tikzset
-□ No function calls inside coordinate values — only plain numbers`;
+${figureRulesFor(kind)}
+
+TỰ KIỂM trước khi xuất FINAL_CODE:
+- Mọi \\coordinate dùng tới đều đã khai TRƯỚC đó (thứ tự quan trọng).
+- Mọi \\usetikzlibrary khai ra đều nằm trong danh sách cho phép và đều thật sự được dùng.
+- Mọi nhãn có ký hiệu toán đều nằm trong $...$, ngoặc cân.
+- \\pic angle chỉ tham chiếu tên điểm đã khai.
+- KHÔNG có ký tự có dấu tiếng Việt ở bất cứ đâu, kể cả trong dòng chú thích %.`;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -178,9 +174,11 @@ export async function generateTikzMultiAgent(
   apiKey: string,
   imageBase64: string,
   mimeType: string,
-  options?: { onProgress?: TikzProgressCallback; draftA?: string },
+  options?: { onProgress?: TikzProgressCallback; draftA?: string; kind?: FigureCategory },
 ): Promise<TikzGenerationResult> {
   const { onProgress, draftA } = options ?? {};
+  // `ve` = hình vẽ chưa rõ loại; luật chung, đúng như hành vi trước 1.2.0.
+  const kind: FigureCategory = options?.kind ?? 've';
   const img = { inlineData: { data: imageBase64, mimeType } };
   const log: string[] = [];
   const candidates: string[] = [];
@@ -197,7 +195,7 @@ export async function generateTikzMultiAgent(
 
     try {
       const respB = await withTimeout(
-        callModel(apiKey, [{ text: DRAFT_B_PROMPT }, img], TEMP_CREATIVE),
+        callModel(apiKey, [{ text: draftPrompt(kind) }, img], TEMP_CREATIVE),
         AGENT_TIMEOUT_MS,
         'DraftB',
       );
@@ -216,12 +214,12 @@ export async function generateTikzMultiAgent(
     log.push('Step 1: Running two independent drafts in parallel...');
 
     const callA = withTimeout(
-      callModel(apiKey, [{ text: DRAFT_B_PROMPT }, img], TEMP_STANDARD),
+      callModel(apiKey, [{ text: draftPrompt(kind) }, img], TEMP_STANDARD),
       AGENT_TIMEOUT_MS,
       'DraftA',
     );
     const callB = withTimeout(
-      callModel(apiKey, [{ text: DRAFT_B_PROMPT }, img], TEMP_CREATIVE),
+      callModel(apiKey, [{ text: draftPrompt(kind) }, img], TEMP_CREATIVE),
       AGENT_TIMEOUT_MS,
       'DraftB',
     );
@@ -251,18 +249,9 @@ export async function generateTikzMultiAgent(
 
   // ── Phase 2: Verify + Fix ─────────────────────────────────────────────────
 
-  // If only one candidate, skip verify and return it directly — saves another round-trip
-  if (candidates.length === 1) {
-    log.push('Only one draft available — returning it directly (skipping verify).');
-    onProgress?.('complete', 'TikZ generation complete.');
-    return {
-      tikzCode: candidates[0],
-      candidates,
-      reasoning: 'Single draft — no verification needed.',
-      log,
-    };
-  }
-
+  // Bản trước bỏ HẲN bước soát khi chỉ có một bản nháp. Nhưng bước soát không chỉ để chọn
+  // giữa hai bản — nó còn là chỗ duy nhất bắt lỗi cú pháp và lỗi thiếu/thừa thành phần so
+  // với ảnh. Một bản nháp thì càng cần soát, vì không có bản thứ hai để đối chiếu.
   onProgress?.('verify', 'Verifying drafts against image — picking best result...');
   log.push('Step 2: Verifying both drafts against the image...');
 
@@ -274,7 +263,7 @@ export async function generateTikzMultiAgent(
     callModel(
       apiKey,
       [
-        { text: VERIFY_FIX_PROMPT },
+        { text: verifyPrompt(kind) },
         img,
         { text: `${draftText}\n\nVerify and produce the final code.` },
       ],

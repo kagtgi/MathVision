@@ -7,7 +7,9 @@
  * phương án trong những ca đó là ép nó bịa.
  */
 
-import { LATEX_MATH_RULES, TIKZJAX_COMPAT_RULES } from '../utils/sharedPrompts.ts';
+import { LATEX_MATH_RULES } from '../utils/sharedPrompts.ts';
+import { figureRulesFor } from '../utils/figurePrompts.ts';
+import { tikzCapsRules } from '../utils/tikzCapabilities.ts';
 
 export type QType = 'TN' | 'DS' | 'TLN' | 'TL';
 
@@ -56,22 +58,33 @@ const HONESTY_RULES = String.raw`BA LUẬT BẮT BUỘC — làm sai là hỏng 
 const FIGURE_RULES = String.raw`HÌNH VẼ MINH HOẠ
 
 Quyết định có vẽ hay không:
-- HÌNH HỌC KHÔNG GIAN LỚP 11 (hình chóp, lăng trụ, tứ diện, hình hộp; quan hệ song
-  song / vuông góc; góc; khoảng cách) mà đề CHƯA CÓ HÌNH -> BẮT BUỘC vẽ (veHinh = true).
-- TOẠ ĐỘ Oxyz LỚP 12 -> tự cân nhắc: vẽ khi hình giúp thấy quan hệ (mặt cầu tiếp xúc
-  mặt phẳng, vị trí tương đối, hình chiếu, khoảng cách); KHÔNG vẽ khi bài thuần tính
-  toán toạ độ / phương trình, vẽ thừa chỉ làm rối.
-- Đề ĐÃ CÓ HÌNH, hoặc bài đại số / thống kê / dãy số -> veHinh = false.
+- HÌNH HỌC KHÔNG GIAN (hình chóp, lăng trụ, tứ diện, hình hộp; quan hệ song song /
+  vuông góc; góc; khoảng cách) mà đề CHƯA CÓ HÌNH -> BẮT BUỘC vẽ (veHinh = true).
+- KHẢO SÁT HÀM SỐ: bài xét tính đơn điệu, cực trị, hoặc đọc bảng biến thiên -> vẽ
+  BẢNG BIẾN THIÊN. Bài về dạng đồ thị, số nghiệm của phương trình theo tham số,
+  tương giao -> vẽ ĐỒ THỊ. Đây là hai loại hình mà lời giải phải "đọc" được từ hình,
+  nên có hình là hiểu ngay.
+- TOẠ ĐỘ Oxyz -> tự cân nhắc: vẽ khi hình giúp thấy quan hệ (mặt cầu tiếp xúc mặt
+  phẳng, vị trí tương đối, hình chiếu, khoảng cách); KHÔNG vẽ khi bài thuần tính toán
+  toạ độ / phương trình, vẽ thừa chỉ làm rối.
+- Đề ĐÃ CÓ HÌNH -> veHinh = false.
+- Bài thuần đại số, thống kê, dãy số, tổ hợp mà hình không thêm thông tin gì ->
+  veHinh = false. (Riêng bảng số liệu thống kê thì gõ thành BẢNG, không vẽ.)
 - Luôn ghi lyDoHinh một câu ngắn giải thích quyết định.
 
 Khi vẽ, hình phải HOÀN CHỈNH:
 - Đủ đỉnh, mỗi đỉnh có nhãn đặt ngoài hình.
-- Cạnh khuất vẽ NÉT ĐỨT (dashed), cạnh thấy vẽ nét liền.
-- Đáy hình chóp/lăng trụ vẽ theo phối cảnh dạng hình bình hành, KHÔNG vẽ thành hình
-  chữ nhật nhìn thẳng.
 - Vẽ đủ đường cao, đoạn phụ, chân đường vuông góc mà lời giải có nhắc tới.
 - Đánh dấu góc vuông ở nơi cần thiết.
-${TIKZJAX_COMPAT_RULES}`;
+
+Áp đúng quy ước của LOẠI hình mình đang vẽ:
+${figureRulesFor('khonggian')}
+
+Nếu vẽ BẢNG BIẾN THIÊN thì theo luật riêng sau:
+${figureRulesFor('bbt')}
+
+Nếu vẽ ĐỒ THỊ HÀM SỐ thì theo luật riêng sau:
+${figureRulesFor('dothi')}`;
 
 const TYPE_RULES: Record<QType, string> = {
   TN: String.raw`LOẠI CÂU: trắc nghiệm bốn phương án.
@@ -125,14 +138,19 @@ export function figureCheckPrompt(questionText: string): string {
     'CÂU HỎI:',
     questionText,
     '',
-    'Soi kỹ ảnh: hình có đúng với đề không? Thiếu đỉnh, thiếu nhãn, thiếu đoạn phụ nào?' +
-      ' Cạnh khuất đã là nét đứt chưa? Đáy đã vẽ theo phối cảnh chưa?',
+    'Soi kỹ ảnh: hình có đúng với đề không? Thiếu đỉnh, thiếu nhãn, thiếu đoạn phụ nào?',
+    'Mọi điểm có nằm ĐÚNG trên cạnh/mặt của nó không? Có tự thêm quan hệ song song /',
+    'vuông góc mà đề không nói không?',
+    'Hình không gian: cạnh khuất đã là nét đứt chưa? Đáy đã vẽ thành hình bình hành chưa?',
+    'Bảng biến thiên: thứ tự mốc x, dấu f\'(x) và chiều mũi tên f(x) có khớp nhau không?',
+    'Đồ thị: nghiệm, cực trị, tiệm cận, chiều đơn điệu có đúng không? Có nối qua điểm',
+    'gián đoạn không?',
     '',
     'Nếu hình ĐÃ ĐẠT: trả đúng một dòng "OK".',
     'Nếu CHƯA ĐẠT: trả về mã TikZ đã sửa, bắt đầu bằng \\begin{tikzpicture} và kết thúc' +
       ' bằng \\end{tikzpicture}, không kèm lời dẫn.',
     '',
-    TIKZJAX_COMPAT_RULES,
+    tikzCapsRules(),
   ].join('\n');
 }
 

@@ -1,8 +1,20 @@
+import { sanitizeTikz } from './tikzSanitize.ts';
+
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const RETINA_SCALE = 2;
 const TIKZ_RENDER_TIMEOUT_MS = 30000;
 const MIN_TIKZ_DIMENSION = 100;
+
+/**
+ * Dưới ngưỡng này coi như KHÔNG dựng được.
+ *
+ * Vì sao cần: ra được `<svg>` không có nghĩa là ra được hình. Một `tikzpicture` rỗng vẫn
+ * sinh SVG hợp lệ, rồi `MIN_TIKZ_DIMENSION` biến nó thành PNG trắng 100×100 — và bản trắng
+ * đó đi thẳng vào file Word. Đo mực là phép kiểm duy nhất bắt được.
+ * Đối chiếu: hình thật trong bộ probe đo được 1,7%–13% mực.
+ */
+const MIN_INK_RATIO = 0.002;
 
 // ─── TikZ preprocessing for TikZJax compatibility ───────────────────────────
 // TikZJax doesn't support PGF math functions (sqrt, sin, cos, etc.) in
@@ -130,6 +142,62 @@ function absoluteUrl(relative: string): string {
   }
 }
 
+// ─── Nhúng font vào SVG ───────────────────────────────────────────────────────
+//
+// TikZJax xuất nhãn thành `<text font-family="cmr10">…`, tức là chữ PHỤ THUỘC font ngoài.
+// Hai chỗ hỏng cộng lại làm mọi nhãn hình bị sai glyph:
+//   1. `fonts.css` trỏ `../bakoma/ttf/` → phân giải ra ngoài thư mục, cả 140 rule đều 404.
+//      (Đã sửa thành `./bakoma/ttf/`.)
+//   2. Sửa đường dẫn vẫn CHƯA đủ: SVG nạp qua `new Image()` chạy ở chế độ cô lập, trình
+//      duyệt KHÔNG tải tài nguyên ngoài — font vẫn không tới. Nên phải nhúng thẳng vào SVG
+//      dạng data: URI trước khi rasterise.
+// Chỉ nhúng đúng những font mà SVG thực dùng (thường 1-4 file, mỗi file ~35 KB) chứ không
+// phải cả 140.
+
+const BAKOMA_DIR = './vendor/tikzjax/bakoma/ttf/';
+const fontCache = new Map<string, string | null>();
+
+async function fontDataUri(name: string): Promise<string | null> {
+  const hit = fontCache.get(name);
+  if (hit !== undefined) return hit;
+  try {
+    const res = await fetch(absoluteUrl(BAKOMA_DIR + name + '.ttf'));
+    if (!res.ok) throw new Error(String(res.status));
+    const buf = new Uint8Array(await res.arrayBuffer());
+    let bin = '';
+    for (let i = 0; i < buf.length; i += 8192) {
+      bin += String.fromCharCode(...buf.subarray(i, i + 8192));
+    }
+    const uri = 'data:font/ttf;base64,' + btoa(bin);
+    fontCache.set(name, uri);
+    return uri;
+  } catch {
+    fontCache.set(name, null);
+    return null;
+  }
+}
+
+/** Chèn `@font-face` dạng data: URI cho mọi font mà SVG tham chiếu. */
+async function embedTikzFonts(svgXml: string): Promise<string> {
+  const names = [
+    ...new Set(
+      [...svgXml.matchAll(/font-family\s*[:=]\s*["']?([A-Za-z0-9]+)/g)].map((m) => m[1]),
+    ),
+  ];
+  if (!names.length) return svgXml;
+
+  const faces: string[] = [];
+  for (const n of names) {
+    const uri = await fontDataUri(n);
+    if (uri) faces.push(`@font-face{font-family:'${n}';src:url(${uri}) format('truetype');}`);
+  }
+  if (!faces.length) return svgXml;
+
+  const style = `<style type="text/css"><![CDATA[${faces.join('')}]]></style>`;
+  // Chèn ngay sau thẻ <svg …> mở.
+  return svgXml.replace(/(<svg\b[^>]*>)/, `$1${style}`);
+}
+
 function tikzIframeHtml(code: string): string {
   // Chẻ chuỗi đóng thẻ để không kết thúc sớm thẻ script của chính tài liệu này.
   const close = '</' + 'script>';
@@ -162,13 +230,47 @@ function waitForSvgIn(doc: Document, timeoutMs: number): Promise<SVGSVGElement |
   });
 }
 
+/** Tỉ lệ pixel không-trắng. Ngưỡng 250 để bỏ qua viền chống răng cưa. */
+function inkRatio(ctx: CanvasRenderingContext2D, w: number, h: number): number {
+  try {
+    const { data } = ctx.getImageData(0, 0, w, h);
+    let dark = 0;
+    for (let i = 0; i < data.length; i += 4) {
+      if (data[i] < 250 || data[i + 1] < 250 || data[i + 2] < 250) dark++;
+    }
+    return dark / (w * h);
+  } catch {
+    return 1; // đọc pixel hỏng thì đừng loại oan hình
+  }
+}
+
+export interface TikzRenderResult {
+  bytes: Uint8Array;
+  width: number;
+  height: number;
+  /** Tỉ lệ mực đo được, để bên gọi ghi nhật ký. */
+  ink: number;
+}
+
 /**
- * Dựng mã TikZ thành PNG. Trả null nếu compile hỏng hoặc quá thời gian — bên gọi phải
- * coi đó là "không có hình" và đi tiếp, không được để chỗ trống trong tài liệu.
+ * Dựng mã TikZ thành PNG. Trả null nếu compile hỏng, quá thời gian, hoặc dựng ra hình trắng
+ * — bên gọi phải coi đó là "không có hình" và đi tiếp, không được để chỗ trống trong tài liệu.
+ *
+ * `onNote` nhận những gì bộ lọc đã sửa (bỏ dấu tiếng Việt, bỏ thư viện không có…) để đưa vào
+ * nhật ký xử lý. Trước đây mọi thất bại đều im lặng, không phân biệt được treo với sai cú pháp.
  */
 export async function tikzToImage(
   tikzCode: string,
-): Promise<{ bytes: Uint8Array; width: number; height: number } | null> {
+  onNote?: (note: string) => void,
+): Promise<TikzRenderResult | null> {
+  // Lọc TRƯỚC khi dựng: bốn thứ đo được là chết hẳn (xem tikzSanitize.ts) đều phải bị chặn ở
+  // đây, không thì mất trọn 30 giây timeout rồi rơi hình mà không ai biết vì sao.
+  const clean = sanitizeTikz(tikzCode);
+  for (const n of clean.notes) onNote?.(n);
+  if (!clean.usable) {
+    onNote?.('mã TikZ không dùng được — bỏ hình');
+    return null;
+  }
   const iframe = document.createElement('iframe');
   iframe.setAttribute('aria-hidden', 'true');
   iframe.style.position = 'fixed';
@@ -190,7 +292,7 @@ export async function tikzToImage(
       return null;
     }
     doc.open();
-    doc.write(tikzIframeHtml(preprocessTikzForTikzJax(tikzCode)));
+    doc.write(tikzIframeHtml(preprocessTikzForTikzJax(clean.code)));
     doc.close();
 
     const svg = await waitForSvgIn(doc, TIKZ_RENDER_TIMEOUT_MS);
@@ -203,42 +305,51 @@ export async function tikzToImage(
     const width = Math.max(Math.ceil(rect.width * RETINA_SCALE), MIN_TIKZ_DIMENSION);
     const height = Math.max(Math.ceil(rect.height * RETINA_SCALE), MIN_TIKZ_DIMENSION);
 
-    // Nhúng font vào SVG là không cần: TikZJax xuất chữ dưới dạng <path>.
-    const svgData = new XMLSerializer().serializeToString(svg);
+    // TikZJax xuất chữ dưới dạng <text font-family="cmr10">, KHÔNG phải <path> (bản trước
+    // ghi ngược ở đây). Nghĩa là nhãn phụ thuộc font ngoài — xem `embedTikzFonts`.
+    const svgData = await embedTikzFonts(new XMLSerializer().serializeToString(svg));
     const svgUrl = URL.createObjectURL(new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' }));
 
-    const result = await new Promise<{ bytes: Uint8Array; width: number; height: number } | null>(
-      (resolve) => {
-        const img = new Image();
-        img.onload = () => {
-          const canvas = document.createElement('canvas');
-          canvas.width = width;
-          canvas.height = height;
-          const ctx = canvas.getContext('2d');
-          if (!ctx) {
-            URL.revokeObjectURL(svgUrl);
+    const result = await new Promise<TikzRenderResult | null>((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          URL.revokeObjectURL(svgUrl);
+          resolve(null);
+          return;
+        }
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, width, height);
+        ctx.drawImage(img, 0, 0, width, height);
+        URL.revokeObjectURL(svgUrl);
+
+        const ink = inkRatio(ctx, width, height);
+        if (ink < MIN_INK_RATIO) {
+          onNote?.(`hình dựng ra gần như trắng (${(ink * 100).toFixed(2)}% mực) — bỏ hình`);
+          resolve(null);
+          return;
+        }
+
+        canvas.toBlob((blob) => {
+          if (!blob) {
             resolve(null);
             return;
           }
-          ctx.fillStyle = '#ffffff';
-          ctx.fillRect(0, 0, width, height);
-          ctx.drawImage(img, 0, 0, width, height);
-          URL.revokeObjectURL(svgUrl);
-          canvas.toBlob((blob) => {
-            if (!blob) {
-              resolve(null);
-              return;
-            }
-            blob.arrayBuffer().then((ab) => resolve({ bytes: new Uint8Array(ab), width, height }));
-          }, 'image/png');
-        };
-        img.onerror = () => {
-          URL.revokeObjectURL(svgUrl);
-          resolve(null);
-        };
-        img.src = svgUrl;
-      },
-    );
+          blob
+            .arrayBuffer()
+            .then((ab) => resolve({ bytes: new Uint8Array(ab), width, height, ink }));
+        }, 'image/png');
+      };
+      img.onerror = () => {
+        URL.revokeObjectURL(svgUrl);
+        resolve(null);
+      };
+      img.src = svgUrl;
+    });
 
     cleanup();
     return result;

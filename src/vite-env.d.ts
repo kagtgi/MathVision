@@ -19,11 +19,44 @@ interface UpdateState {
   portable?: boolean;
 }
 
+/** `none` = chưa lưu key nào; `plain` = máy không có kho khoá, key nằm dạng chữ thường. */
+type KeyEnc = 'safeStorage' | 'plain' | 'none';
+
+interface StoredKeyState {
+  ok: boolean;
+  key: string;
+  enc: KeyEnc;
+  encryptionAvailable: boolean;
+  models?: string[];
+  /** Đường dẫn secrets.json — hiện trong Cài đặt khi key chưa được mã hoá. */
+  path?: string;
+  upgraded?: boolean;
+}
+
 interface MathVisionBridge {
   saveFile(
     suggestedName: string,
     data: Uint8Array,
   ): Promise<{ ok: boolean; path?: string; error?: string; canceled?: boolean }>;
+  historyIndex(): Promise<{ ok: boolean; rows: unknown[] }>;
+  historySave(payload: unknown): Promise<{ ok: boolean; id?: string; bytes?: number; pruned?: string[]; error?: string }>;
+  historyUpdate(payload: unknown): Promise<{ ok: boolean; bytes?: number; error?: string }>;
+  historyLoad(
+    id: string,
+  ): Promise<{ ok: boolean; entryJson?: string; figures?: { file: string; bytes: Uint8Array }[]; error?: string }>;
+  historyThumbs(ids: string[]): Promise<{ ok: boolean; thumbs: { id: string; bytes: Uint8Array }[] }>;
+  historyDelete(id: string): Promise<{ ok: boolean }>;
+  historyClear(): Promise<{ ok: boolean }>;
+  historyStats(): Promise<{
+    ok: boolean;
+    count: number;
+    bytes: number;
+    maxEntries: number;
+    maxBytes: number;
+  }>;
+  getApiKey(): Promise<StoredKeyState>;
+  setApiKey(key: string, models?: string[]): Promise<{ ok: boolean; enc: KeyEnc; error?: string }>;
+  clearApiKey(): Promise<{ ok: boolean; error?: string }>;
   getVersion(): Promise<string>;
   getUpdateState(): Promise<UpdateState>;
   checkUpdates(): Promise<UpdateState>;

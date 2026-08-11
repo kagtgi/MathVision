@@ -30,7 +30,7 @@
     "docx": "^9.6.1",
     "docx-preview": "^0.4.0",
     "electron-updater": "^6.8.9",
-    "framer-motion": "^12.38.0",
+    "framer-motion": "^13.0.0",
     "lucide-react": "^0.546.0",
     "pdfjs-dist": "4.10.38",
     "react": "^19.0.0",

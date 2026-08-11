@@ -27,6 +27,8 @@ import { recheck, runTextPipeline } from './pipeline/runPipeline';
 import type { QcIssue } from './pipeline/qc';
 import { tikzToImage } from './utils/latexToImage';
 import { generateTikzMultiAgent } from './utils/tikzMultiAgent';
+import { isRedrawable } from './utils/figurePrompts';
+import { scoreRedraw } from './utils/scoreRedraw';
 
 const MAX_PDF_SIZE_BYTES = 50 * 1024 * 1024;
 const RENDER_BATCH_SIZE = 4;
@@ -220,12 +222,15 @@ export default function PdfToDocxConverter({ apiKey, models }: Props) {
       // mới hiện kết quả, nên thứ nhìn thấy vẫn là bản cuối.
       const tikzWork = (async () => {
         if (!toggles.redrawTikz) return;
-        const drawable = figureJobs.filter((j) => j.kind === 've' && map.has(j.id));
+        // `isRedrawable` thay cho `kind === 've'`: từ 1.2.0 loại hình được chia nhỏ (bbt,
+        // dothi, khonggian, phang, model) để chọn đúng luật vẽ, `ve` chỉ còn là giá trị dự
+        // phòng khi chưa phân loại được.
+        const drawable = figureJobs.filter((j) => isRedrawable(j.kind) && map.has(j.id));
         const skipped = figureJobs.length - drawable.length;
         for (const [i, job] of drawable.entries()) {
           if (controller.signal.aborted) return;
           addLog(`TikZ: đang vẽ lại hình ${i + 1}/${drawable.length} (${job.id})`);
-          const ok = await redrawOne(job.id, map.get(job.id)!, controller);
+          const ok = await redrawOne(job.id, map.get(job.id)!, controller, job.kind);
           if (!ok) allWarnings.push(`Hình ${job.id}: dựng TikZ không đạt — dùng ảnh cắt từ đề.`);
         }
         if (skipped) {
@@ -286,23 +291,44 @@ export default function PdfToDocxConverter({ apiKey, models }: Props) {
   };
 
   /**
-   * Dựng lại MỘT hình bằng TikZ, thay vào chỗ ảnh cắt nếu thành công.
+   * Dựng lại MỘT hình bằng TikZ, và CHỈ thay vào chỗ ảnh cắt khi bản vẽ lại thật sự tốt hơn.
    *
-   * Trả `false` khi không dựng được — lúc đó ảnh cắt vẫn nguyên trong figureMap nên tài
-   * liệu không bao giờ thiếu hình. Hỏng một hình không được làm hỏng cả tài liệu, nên
-   * mọi lỗi đều nuốt tại đây.
+   * Bản trước thay ngay khi mã compile được, mà bước soát thì chỉ đọc ảnh gốc cùng hai chuỗi
+   * mã — KHÔNG BAO GIỜ nhìn ảnh mình vừa dựng. Nên nó có thể lặng lẽ thay một ảnh cắt đọc
+   * được bằng một hình sai-mà-vẫn-dựng-được. Giờ đưa ẢNH CẮT GỐC và ẢNH VỪA DỰNG cạnh nhau
+   * cho model chấm, thua thì giữ ảnh cắt.
+   *
+   * Trả `false` khi giữ ảnh cắt — lúc đó ảnh cắt vẫn nguyên trong figureMap nên tài liệu
+   * không bao giờ thiếu hình. Hỏng một hình không được làm hỏng cả tài liệu, nên mọi lỗi
+   * đều nuốt tại đây.
    */
   const redrawOne = async (
     id: string,
     fig: { bytes: Uint8Array },
     controller: AbortController,
+    kind: FigureKind,
   ): Promise<boolean> => {
     try {
-      const gen = await generateTikzMultiAgent(apiKey, bytesToBase64(fig.bytes), 'image/png');
+      const gen = await generateTikzMultiAgent(apiKey, bytesToBase64(fig.bytes), 'image/png', {
+        kind,
+      });
       if (controller.signal.aborted) return false;
       if (!gen.tikzCode.includes('\\begin{tikzpicture}')) return false;
-      const png = await tikzToImage(gen.tikzCode);
+      const png = await tikzToImage(gen.tikzCode, (n) => addLog(`TikZ ${id}: ${n}`));
       if (!png) return false;
+      if (controller.signal.aborted) return false;
+
+      const verdict = await scoreRedraw(
+        apiKey,
+        bytesToBase64(fig.bytes),
+        bytesToBase64(png.bytes),
+        kind,
+      );
+      if (verdict.keep === 'crop') {
+        addLog(`TikZ ${id}: giữ ảnh cắt — ${verdict.why}`);
+        return false;
+      }
+
       figuresRef.current.set(id, {
         bytes: png.bytes,
         w: png.width,

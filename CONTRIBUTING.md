@@ -27,7 +27,7 @@ npm run lint
 npm run verify
 ```
 
-`npm run verify` là bộ kiểm thật của dự án (không có Jest/Vitest). Bảy harness:
+`npm run verify` là bộ kiểm thật của dự án (không có Jest/Vitest). Mười hai harness:
 
 | Harness | Kiểm gì |
 |---|---|
@@ -37,7 +37,12 @@ npm run verify
 | `verify-solver-shape.mjs` | lời giải do máy sinh ra đúng bố cục sau khi tái cấu trúc |
 | `verify-vdc.mjs` | docx + .txt định dạng VDC khớp spec, và định dạng thường không bị đổi |
 | `verify-textlayer.mjs` | phép đối chiếu lớp văn bản PDF bắt được lỗi thật, không báo oan |
+| `verify-tikz-sanitize.mjs` | bộ lọc mã TikZ chặn bốn thứ đã ĐO là làm chết hình |
+| `verify-history.mjs` | lưu → mở lại → xuất Word ra `document.xml` trùng từng ký tự |
 | `verify-download.mjs` | luồng lưu file của bản đóng gói — **cần một bản `.exe` đã build** |
+| `verify-update.mjs` | `electron-updater` có trong asar, có `app-update.yml` + `latest.yml` — **cần build** |
+| `verify-secrets.mjs` | `secrets.json` không chứa key đọc được — **cần build** |
+| `verify-history-app.mjs` | kho lịch sử trên đĩa, chặn id dạng đường dẫn — **cần build** |
 
 **Ba harness cần dữ liệu ngoài repo.** `verify-pipeline`, `verify-docx` và
 `verify-numbering` (phần golden) đọc 25 file `.mmd` ở `MMD KTGK/` và `MMD KTTX/`

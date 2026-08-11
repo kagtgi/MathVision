@@ -13,7 +13,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useDropzone, type FileRejection } from 'react-dropzone';
-import { AlertCircle, FileText, Loader2, Upload, X } from 'lucide-react';
+import { AlertCircle, FileText, History as HistoryIcon, Loader2, Upload, X } from 'lucide-react';
 
 import MmdWorkbench from './components/MmdWorkbench';
 import OptionToggles, { type PipelineToggles } from './components/OptionToggles';
@@ -29,6 +29,9 @@ import { tikzToImage } from './utils/latexToImage';
 import { generateTikzMultiAgent } from './utils/tikzMultiAgent';
 import { isRedrawable } from './utils/figurePrompts';
 import { scoreRedraw } from './utils/scoreRedraw';
+import * as historyStore from './history/store';
+import type { RestoredConversion } from './history/store';
+import { canvasThumbJpeg } from './history/thumb';
 
 const MAX_PDF_SIZE_BYTES = 50 * 1024 * 1024;
 const RENDER_BATCH_SIZE = 4;
@@ -36,10 +39,21 @@ const RENDER_BATCH_SIZE = 4;
 interface Props {
   apiKey: string;
   models?: string[];
+  /** Mục lịch sử vừa được mở lại; `restoreSeq` tăng mỗi lần mở để effect chạy lại. */
+  restore?: RestoredConversion | null;
+  restoreSeq?: number;
 }
 
-export default function PdfToDocxConverter({ apiKey, models }: Props) {
+export default function PdfToDocxConverter({ apiKey, models, restore, restoreSeq }: Props) {
   const [pdfFile, setPdfFile] = useState<File | null>(null);
+  /**
+   * Tên nguồn để đặt tên file .docx.
+   *
+   * Không lấy trực tiếp từ `pdfFile.name` nữa: mục mở lại từ lịch sử KHÔNG có `File` nào, nên
+   * thiếu state này thì file xuất ra tên `de-thi.docx` chứ không phải stem gốc.
+   */
+  const [sourceName, setSourceName] = useState('de-thi');
+  const [restoredFrom, setRestoredFrom] = useState<{ fileName: string; at: number } | null>(null);
   const [busy, setBusy] = useState(false);
   const [stage, setStage] = useState('');
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
@@ -63,6 +77,10 @@ export default function PdfToDocxConverter({ apiKey, models }: Props) {
   });
 
   const abortRef = useRef<AbortController | null>(null);
+  /** Id mục lịch sử của lượt chạy hiện tại, để `update` khi người dùng sửa MMD. */
+  const historyIdRef = useRef<string | null>(null);
+  const saveTimerRef = useRef<number | null>(null);
+  const thumbRef = useRef<Uint8Array | undefined>(undefined);
   const figuresRef = useRef<FigureMap>(new Map());
 
   useEffect(() => () => abortRef.current?.abort(), []);
@@ -79,6 +97,9 @@ export default function PdfToDocxConverter({ apiKey, models }: Props) {
       return;
     }
     setPdfFile(file);
+    setSourceName(file.name);
+    setRestoredFrom(null);
+    historyIdRef.current = null;
     setError(null);
     setMmd('');
     setIssues([]);
@@ -149,6 +170,12 @@ export default function PdfToDocxConverter({ apiKey, models }: Props) {
         setStage(`Đang dựng ảnh trang ${end}/${total}…`);
         setProgress({ done: end, total });
       }
+
+      // Ảnh nhỏ cho danh sách lịch sử phải chụp NGAY ĐÂY. `canvases` là biến cục bộ của
+      // `process()` và không được giữ vào ref nào, nên sau khi hàm này trả về thì pixel trang
+      // đã mất — đọc lúc lưu là đọc vào chỗ trống.
+      const page1 = canvases.get(1);
+      thumbRef.current = page1 ? await canvasThumbJpeg(page1) : undefined;
 
       // ── Đọc từng trang thành MMD ──
       // Chạy tuần tự để đuôi trang trước làm ngữ cảnh cho trang sau (nối liền câu bị
@@ -281,6 +308,25 @@ export default function PdfToDocxConverter({ apiKey, models }: Props) {
       setDisagreements(result.disagreements);
       setStage('');
       setProgress(null);
+
+      // Lưu lịch sử CHỈ khi chạy xong trọn vẹn. Một MMD dở dang trong danh sách còn tệ hơn
+      // không có mục nào.
+      if (!controller.signal.aborted) {
+        historyIdRef.current = await historyStore.save({
+          mode: 'pdf-to-word',
+          fileName: pdfFile.name,
+          pageCount: total,
+          mmd: result.mmd,
+          notes: [...allWarnings, ...result.notes],
+          issues: [...textLayerIssues, ...result.issues],
+          disagreements: result.disagreements,
+          wordOptions,
+          toggles,
+          figures: figuresRef.current,
+          thumb: thumbRef.current,
+          meta: { models },
+        });
+      }
     } catch (err) {
       if (!controller.signal.aborted) {
         setError(err instanceof Error ? err.message : 'Lỗi không xác định.');
@@ -344,8 +390,68 @@ export default function PdfToDocxConverter({ apiKey, models }: Props) {
 
   const onMmdChange = (next: string) => {
     setMmd(next);
-    setIssues(recheck(next, new Set(figuresRef.current.keys()), disagreements));
+    const nextIssues = recheck(next, new Set(figuresRef.current.keys()), disagreements);
+    setIssues(nextIssues);
+    queueHistoryUpdate(next, nextIssues);
   };
+
+  /**
+   * Ghi lại mục lịch sử sau khi người dùng ngừng gõ ~3 giây.
+   *
+   * CHỈ ghi `entry.json` + một dòng index (~300 KB), KHÔNG đụng `figures/` — đó là toàn bộ ý
+   * nghĩa của việc tách file: ghi cả hình mỗi nhịp debounce sẽ là vài MB ra đĩa mỗi lần gõ.
+   */
+  const queueHistoryUpdate = (nextMmd: string, nextIssues: QcIssue[]) => {
+    const id = historyIdRef.current;
+    if (!id) return;
+    if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = window.setTimeout(() => {
+      void historyStore.update(id, { mmd: nextMmd, issues: nextIssues, wordOptions });
+    }, 3000);
+  };
+
+  // Đổi định dạng / font / số câu bắt đầu cũng phải lưu, để mở lại ra đúng bản vừa xuất.
+  useEffect(() => {
+    const id = historyIdRef.current;
+    if (!id || !mmd) return;
+    void historyStore.update(id, { mmd, issues, wordOptions });
+  }, [wordOptions]);
+
+  // Flush lần ghi đang chờ khi rời khỏi màn hình, đừng mất chữ vừa sửa.
+  useEffect(
+    () => () => {
+      if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
+    },
+    [],
+  );
+
+  /**
+   * Nhận mục vừa mở lại từ lịch sử.
+   *
+   * Ba chỗ dễ sai, đều phải làm đúng:
+   *  - gán `figuresRef.current` (cái REF, không chỉ state): `onMmdChange` đọc ref để dựng
+   *    `figureIds` cho QC, thiếu là gõ một ký tự thành "Hình không có dữ liệu" cho MỌI hình;
+   *  - `setDisagreements`: nó chỉ được set trong `process()`, mở lại kiểu hồn nhiên là mất
+   *    sạch cảnh báo "hai lượt lệch nhau";
+   *  - `new Map(...)`: deps của effect xem trước có `figures`, trao lại Map trùng identity thì
+   *    khung xem trước không vẽ lại.
+   */
+  useEffect(() => {
+    if (!restore || restore.mode !== 'pdf-to-word') return;
+    figuresRef.current = restore.figures;
+    setFigures(new Map(restore.figures));
+    setDisagreements(restore.disagreements);
+    setIssues(restore.issues);
+    setNotes(restore.notes);
+    setWordOptions(restore.wordOptions);
+    setToggles(restore.toggles);
+    setSourceName(restore.fileName);
+    setPdfFile(null); // không có PDF gốc -> không chạy lại được, nút chạy phải ẩn
+    setError(null);
+    setMmd(restore.mmd); // đặt cuối: đây là thứ mount khu làm việc
+    historyIdRef.current = restore.id;
+    setRestoredFrom({ fileName: restore.fileName, at: restore.createdAt });
+  }, [restoreSeq]);
 
   return (
     <div className="flex-1 flex overflow-hidden min-h-0">
@@ -385,6 +491,26 @@ export default function PdfToDocxConverter({ apiKey, models }: Props) {
           </div>
 
           <OptionToggles value={toggles} onChange={setToggles} disabled={busy} />
+
+          {restoredFrom && (
+            <div className="card p-2.5 flex items-start gap-2">
+              <HistoryIcon className="w-3.5 h-3.5 mt-0.5 shrink-0" style={{ color: 'var(--accent)' }} />
+              <div className="flex-1 min-w-0">
+                <p className="text-[12.5px] truncate">Mở lại: {restoredFrom.fileName}</p>
+                <p className="t-small">
+                  {new Date(restoredFrom.at).toLocaleString('vi-VN')} · xuất Word được, chạy lại
+                  thì cần thả PDF gốc
+                </p>
+              </div>
+              <button
+                onClick={() => setRestoredFrom(null)}
+                style={{ color: 'var(--ink-4)' }}
+                aria-label="Đóng"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
 
           {/* Chọn trước khi chạy; đổi lại được ở thanh công cụ khu làm việc. */}
           <WordOptions
@@ -468,7 +594,7 @@ export default function PdfToDocxConverter({ apiKey, models }: Props) {
           issues={issues}
           notes={notes}
           figures={figures}
-          fileName={pdfFile?.name ?? 'de-thi'}
+          fileName={sourceName}
           busy={busy}
           wordOptions={wordOptions}
           onWordOptionsChange={setWordOptions}

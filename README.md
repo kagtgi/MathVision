@@ -102,8 +102,8 @@ equation do thư viện sinh ra, và đây là cách file mẫu chuẩn đang d�
 ```bash
 npm install
 npm run dev              # http://localhost:3000
-npm run verify           # 8 bộ kiểm chứng, phải PASS hết trước khi commit
-npm run verify:ci        # chỉ 4 bộ tự chứa fixture — cũng là bộ CI chạy trên mỗi PR
+npm run verify           # 12 bộ kiểm chứng, phải PASS hết trước khi commit
+npm run verify:ci        # chỉ 6 bộ tự chứa fixture — cũng là bộ CI chạy trên mỗi PR
 npm run electron:build   # -> release/MathVision-Setup-<version>.exe + bản portable
 ```
 
@@ -136,9 +136,17 @@ Dựng lại bằng `node scripts/build-fonts.mjs <thư-mục-Google_Sans>`.
 | `verify-textlayer.mjs` | Lớp đối chiếu văn bản PDF bắt được lỗi thật mà không báo oan |
 | `verify-download.mjs` | Bấm Tải trong bản đóng gói thì file thật sự được ghi ra đĩa |
 | `verify-update.mjs` | Bản đóng gói có đủ `electron-updater` trong asar, `app-update.yml` và `latest.yml` |
+| `verify-tikz-sanitize.mjs` | Bộ lọc mã TikZ chặn đúng bốn thứ đã đo là làm chết hình |
+| `verify-history.mjs` | Lưu → mở lại → xuất Word ra `document.xml` trùng **từng ký tự** |
+| `verify-secrets.mjs` | `secrets.json` của bản đóng gói **không chứa** key đọc được |
+| `verify-history-app.mjs` | Kho lịch sử trên đĩa: sửa chữ không mất hình, chặn id dạng đường dẫn |
 
-Sửa gì trong `src/pipeline/` hay `electron/` cũng phải chạy lại cả tám — đó là bằng chứng duy nhất cho việc
-định dạng đầu ra không bị lệch khỏi file mẫu.
+Sửa gì trong `src/pipeline/` hay `electron/` cũng phải chạy lại cả mười hai — đó là bằng chứng duy nhất cho
+việc định dạng đầu ra không bị lệch khỏi file mẫu.
+
+Đo năng lực bộ dựng hình TikZ (chỉ lúc phát triển): `npm run dev` rồi mở `/probe-tikz.html`.
+Kết quả đo được chốt trong [`src/utils/tikzCapabilities.ts`](src/utils/tikzCapabilities.ts), và
+prompt vẽ hình **sinh từ file đó** nên không thể lệch khỏi thực tế renderer.
 
 ## Công nghệ
 

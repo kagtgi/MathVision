@@ -8,7 +8,14 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useDropzone, type FileRejection } from 'react-dropzone';
-import { AlertCircle, Image as ImageIcon, Loader2, Upload, X } from 'lucide-react';
+import {
+  AlertCircle,
+  History as HistoryIcon,
+  Image as ImageIcon,
+  Loader2,
+  Upload,
+  X,
+} from 'lucide-react';
 
 import MmdWorkbench from './components/MmdWorkbench';
 import OptionToggles, { type PipelineToggles } from './components/OptionToggles';
@@ -18,6 +25,9 @@ import { ocrPage } from './pipeline/ocr';
 import { recheck, runTextPipeline } from './pipeline/runPipeline';
 import type { QcIssue } from './pipeline/qc';
 import { tikzToImage } from './utils/latexToImage';
+import * as historyStore from './history/store';
+import type { RestoredConversion } from './history/store';
+import { canvasThumbJpeg } from './history/thumb';
 
 const MAX_FILE_SIZE = 20 * 1024 * 1024;
 const API_MAX_DIM = 2048;
@@ -26,9 +36,15 @@ const API_JPEG_QUALITY = 0.85;
 interface Props {
   apiKey: string;
   models?: string[];
+  /** Mục lịch sử vừa được mở lại; `restoreSeq` tăng mỗi lần mở để effect chạy lại. */
+  restore?: RestoredConversion | null;
+  restoreSeq?: number;
 }
 
-export default function ImageToWordConverter({ apiKey, models }: Props) {
+export default function ImageToWordConverter({ apiKey, models, restore, restoreSeq }: Props) {
+  /** Tên nguồn để đặt tên .docx — mục mở lại từ lịch sử không có `File` nào. */
+  const [sourceName, setSourceName] = useState('de-thi');
+  const [restoredFrom, setRestoredFrom] = useState<{ fileName: string; at: number } | null>(null);
   const [file, setFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -56,6 +72,9 @@ export default function ImageToWordConverter({ apiKey, models }: Props) {
   const fullResRef = useRef<HTMLCanvasElement | null>(null);
   const figuresRef = useRef<FigureMap>(new Map());
   const abortRef = useRef<AbortController | null>(null);
+  const historyIdRef = useRef<string | null>(null);
+  const saveTimerRef = useRef<number | null>(null);
+  const thumbRef = useRef<Uint8Array | undefined>(undefined);
 
   useEffect(() => () => abortRef.current?.abort(), []);
 
@@ -71,6 +90,9 @@ export default function ImageToWordConverter({ apiKey, models }: Props) {
       return;
     }
     setFile(f);
+    setSourceName(f.name);
+    setRestoredFrom(null);
+    historyIdRef.current = null;
     setError(null);
     setMmd('');
     setIssues([]);
@@ -91,6 +113,8 @@ export default function ImageToWordConverter({ apiKey, models }: Props) {
         canvas.getContext('2d')?.drawImage(bitmap, 0, 0);
         bitmap.close();
         fullResRef.current = canvas;
+        // Ảnh nhỏ cho lịch sử: ở chế độ ảnh thì `fullResRef` bền nên chụp ngay đây được.
+        void canvasThumbJpeg(canvas).then((t) => (thumbRef.current = t));
         setPreviewUrl(canvas.toDataURL('image/jpeg', 0.7));
       })
       .catch(() => setError('Không đọc được ảnh. Dùng file PNG, JPG hoặc WebP.'));
@@ -255,6 +279,24 @@ export default function ImageToWordConverter({ apiKey, models }: Props) {
       setDisagreements(result.disagreements);
       setStage('');
       setProgress(null);
+
+      // Chỉ lưu khi chạy xong trọn vẹn — MMD dở dang trong danh sách còn tệ hơn không có.
+      if (!controller.signal.aborted) {
+        historyIdRef.current = await historyStore.save({
+          mode: 'image-to-word',
+          fileName: file.name,
+          pageCount: 1,
+          mmd: result.mmd,
+          notes: [...warnings, ...result.notes],
+          issues: result.issues,
+          disagreements: result.disagreements,
+          wordOptions,
+          toggles,
+          figures: figuresRef.current,
+          thumb: thumbRef.current,
+          meta: { models },
+        });
+      }
     } catch (err) {
       if (!controller.signal.aborted) {
         setError(err instanceof Error ? err.message : 'Lỗi không xác định.');
@@ -266,8 +308,49 @@ export default function ImageToWordConverter({ apiKey, models }: Props) {
 
   const onMmdChange = (next: string) => {
     setMmd(next);
-    setIssues(recheck(next, new Set(figuresRef.current.keys()), disagreements));
+    const nextIssues = recheck(next, new Set(figuresRef.current.keys()), disagreements);
+    setIssues(nextIssues);
+    const id = historyIdRef.current;
+    if (!id) return;
+    // Chỉ ghi lại entry.json, KHÔNG đụng figures/ — xem ghi chú ở PdfToDocxConverter.
+    if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = window.setTimeout(() => {
+      void historyStore.update(id, { mmd: next, issues: nextIssues, wordOptions });
+    }, 3000);
   };
+
+  useEffect(() => {
+    const id = historyIdRef.current;
+    if (!id || !mmd) return;
+    void historyStore.update(id, { mmd, issues, wordOptions });
+  }, [wordOptions]);
+
+  useEffect(
+    () => () => {
+      if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
+    },
+    [],
+  );
+
+  /** Nhận mục mở lại từ lịch sử — ba chỗ dễ sai giải thích ở PdfToDocxConverter. */
+  useEffect(() => {
+    if (!restore || restore.mode !== 'image-to-word') return;
+    figuresRef.current = restore.figures;
+    setFigures(new Map(restore.figures));
+    setDisagreements(restore.disagreements);
+    setIssues(restore.issues);
+    setNotes(restore.notes);
+    setWordOptions(restore.wordOptions);
+    setToggles(restore.toggles);
+    setSourceName(restore.fileName);
+    setFile(null);
+    setPreviewUrl(null);
+    fullResRef.current = null;
+    setError(null);
+    setMmd(restore.mmd);
+    historyIdRef.current = restore.id;
+    setRestoredFrom({ fileName: restore.fileName, at: restore.createdAt });
+  }, [restoreSeq]);
 
   return (
     <div className="flex-1 flex overflow-hidden min-h-0">
@@ -313,6 +396,26 @@ export default function ImageToWordConverter({ apiKey, models }: Props) {
           </div>
 
           <OptionToggles value={toggles} onChange={setToggles} disabled={busy} hideRedraw />
+
+          {restoredFrom && (
+            <div className="card p-2.5 flex items-start gap-2">
+              <HistoryIcon className="w-3.5 h-3.5 mt-0.5 shrink-0" style={{ color: 'var(--accent)' }} />
+              <div className="flex-1 min-w-0">
+                <p className="text-[12.5px] truncate">Mở lại: {restoredFrom.fileName}</p>
+                <p className="t-small">
+                  {new Date(restoredFrom.at).toLocaleString('vi-VN')} · xuất Word được, chạy lại
+                  thì cần thả ảnh gốc
+                </p>
+              </div>
+              <button
+                onClick={() => setRestoredFrom(null)}
+                style={{ color: 'var(--ink-4)' }}
+                aria-label="Đóng"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
 
           {/* Chọn trước khi chạy; đổi lại được ở thanh công cụ khu làm việc. */}
           <WordOptions
@@ -395,7 +498,7 @@ export default function ImageToWordConverter({ apiKey, models }: Props) {
           issues={issues}
           notes={notes}
           figures={figures}
-          fileName={file?.name ?? 'de-thi'}
+          fileName={sourceName}
           busy={busy}
           wordOptions={wordOptions}
           onWordOptionsChange={setWordOptions}

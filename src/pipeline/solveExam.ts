@@ -18,6 +18,7 @@ import {
   type PartType,
 } from './examTransforms.ts';
 import { figureCheckPrompt, solvePrompt, solveSchema, type QType } from './solvePrompts.ts';
+import { tikzCapsRules } from '../utils/tikzCapabilities.ts';
 
 export interface QuestionRef {
   /** Vị trí thứ tự trong toàn đề — dùng để map, KHÔNG dùng số câu (đề in trùng số thật). */
@@ -216,6 +217,50 @@ function extractTikz(text: string): string | null {
   return m ? m[0] : null;
 }
 
+/**
+ * Mã không dựng được thì nhờ model viết lại đơn giản hơn, kèm danh sách thư viện thật sự có.
+ * Trả `null` nếu không cứu được — bên gọi bỏ hình.
+ */
+async function rewriteBrokenTikz(
+  broken: string,
+  questionText: string,
+  opts: SolveOptions,
+): Promise<string | null> {
+  try {
+    const res = await callGemini(opts.apiKey, {
+      parts: [
+        {
+          text: [
+            'Mã TikZ dưới đây KHÔNG dựng được (bộ dựng không báo lỗi cụ thể, chỉ treo rồi bỏ).',
+            'Viết lại ĐƠN GIẢN HƠN cho chắc chắn dựng được: bớt trang trí, bớt lệnh lạ, giữ',
+            'đúng nội dung toán học của hình.',
+            '',
+            'CÂU HỎI:',
+            questionText,
+            '',
+            'MÃ HỎNG:',
+            broken,
+            '',
+            tikzCapsRules(),
+            '',
+            'Chỉ trả mã TikZ, bắt đầu bằng \\begin{tikzpicture}, không kèm lời dẫn.',
+          ].join('\n'),
+        },
+      ],
+      temperature: 0.1,
+      maxOutputTokens: 4096,
+      signal: opts.signal,
+      models: opts.models,
+      label: 'viết lại hình',
+      onLog: opts.onLog,
+    });
+    const fixed = extractTikz(res.text);
+    return fixed && fixed.includes('\\begin{tikzpicture}') ? fixed : null;
+  } catch {
+    return null;
+  }
+}
+
 async function buildFigure(
   ref: QuestionRef,
   tikz: string,
@@ -224,11 +269,27 @@ async function buildFigure(
   if (!opts.renderTikz) return null;
   const id = `sol_c${ref.index + 1}_f1`;
 
+  const label = ref.num ?? ref.index + 1;
   let code = tikz;
+  /** Chỉ cho đúng MỘT lượt viết lại khi mã không dựng được, để không tốn API vô hạn. */
+  let repairsLeft = 1;
+
   for (let round = 0; round <= (opts.verifyFigures ? 2 : 0); round++) {
     const png = await opts.renderTikz(code);
     if (!png) {
-      opts.onLog?.(`[hình câu ${ref.num ?? ref.index + 1}] TikZ không dựng được — bỏ hình.`);
+      // Bản trước bỏ hình NGAY tại đây, nên mã sai cú pháp không bao giờ được sửa: vòng lặp
+      // soi lại chỉ chạy khi render ĐÃ thành công. Cho một lượt viết lại đơn giản hơn.
+      if (repairsLeft > 0 && opts.apiKey) {
+        repairsLeft--;
+        opts.onLog?.(`[hình câu ${label}] TikZ không dựng được — thử viết lại đơn giản hơn.`);
+        const rewritten = await rewriteBrokenTikz(code, ref.text, opts);
+        if (rewritten && rewritten !== code) {
+          code = rewritten;
+          round--; // lượt này chưa tính, vẫn còn nguyên ngân sách soi lại
+          continue;
+        }
+      }
+      opts.onLog?.(`[hình câu ${label}] TikZ không dựng được — bỏ hình.`);
       return null;
     }
     if (!opts.verifyFigures || round === 2) return { id, entry: png };

@@ -10,6 +10,7 @@ import {
   ArrowRight,
   FileText,
   Image as ImageIcon,
+  History as HistoryIcon,
   Loader2,
   Settings as SettingsIcon,
 } from 'lucide-react';
@@ -18,6 +19,8 @@ import ImageToWordConverter from './ImageToWordConverter';
 import PdfToDocxConverter from './PdfToDocxConverter';
 import UpdateToast, { useAppVersion } from './components/UpdateToast';
 import SettingsPanel from './components/SettingsPanel';
+import HistoryPanel from './components/HistoryPanel';
+import { historyAvailable, load as loadHistory, type RestoredConversion } from './history/store';
 import { clearKey, loadKey, saveKey } from './key/keyStore';
 import { checkApiKey, MODEL_CHAIN } from './pipeline/geminiClient';
 
@@ -33,6 +36,13 @@ export default function App() {
   const [models, setModels] = useState<string[]>(MODEL_CHAIN);
   const [mode, setMode] = useState<AppMode>('pdf-to-word');
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  /**
+   * Bàn giao mục vừa mở lại cho converter. `restoreSeq` để converter chạy lại effect kể cả
+   * khi mở lại đúng mục vừa mở.
+   */
+  const [restore, setRestore] = useState<RestoredConversion | null>(null);
+  const [restoreSeq, setRestoreSeq] = useState(0);
   const [storage, setStorage] = useState<{
     enc: KeyEnc;
     encryptionAvailable: boolean;
@@ -225,6 +235,16 @@ export default function App() {
               v{version}
             </span>
           )}
+          {historyAvailable() && (
+            <button
+              onClick={() => setHistoryOpen(true)}
+              className="btn btn-text"
+              title="Mở lại đề đã chuyển, xuất Word không tốn lượt gọi API"
+            >
+              <HistoryIcon className="w-3.5 h-3.5" />
+              Lịch sử
+            </button>
+          )}
           <button
             onClick={() => setSettingsOpen(true)}
             className="btn btn-text"
@@ -250,6 +270,19 @@ export default function App() {
         </div>
       )}
 
+      <HistoryPanel
+        open={historyOpen}
+        onClose={() => setHistoryOpen(false)}
+        onOpen={async (id) => {
+          const entry = await loadHistory(id);
+          if (!entry) return;
+          // Đổi chế độ TRƯỚC khi bàn giao: converter đích phải được mount để nhận.
+          setMode(entry.mode);
+          setRestore(entry);
+          setRestoreSeq((n) => n + 1);
+        }}
+      />
+
       <SettingsPanel
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}
@@ -263,9 +296,19 @@ export default function App() {
       <UpdateToast />
 
       {mode === 'pdf-to-word' ? (
-        <PdfToDocxConverter apiKey={apiKey} models={models} />
+        <PdfToDocxConverter
+          apiKey={apiKey}
+          models={models}
+          restore={restore}
+          restoreSeq={restoreSeq}
+        />
       ) : (
-        <ImageToWordConverter apiKey={apiKey} models={models} />
+        <ImageToWordConverter
+          apiKey={apiKey}
+          models={models}
+          restore={restore}
+          restoreSeq={restoreSeq}
+        />
       )}
     </div>
   );

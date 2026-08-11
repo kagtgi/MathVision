@@ -24,7 +24,8 @@ Chạy hoàn toàn trên máy bằng **Google Gemini** — chỉ cần nhập AP
 ## Bắt đầu trong 3 bước
 
 1. **Tải file** bằng nút phía trên rồi mở lên. Windows báo *"Windows protected your PC"* thì
-   bấm **More info** → **Run anyway** (file chưa mua chứng chỉ ký số).
+   bấm **More info** → **Run anyway** — file chưa mua chứng chỉ ký số nên Windows cảnh báo,
+   không phải dấu hiệu file có hại. Muốn tự kiểm chứng thì xem [mã SHA256 trong Release](https://github.com/kagtgi/MathVision/releases/latest).
 2. **Lấy API key miễn phí** tại **https://aistudio.google.com/apikey** — đăng nhập Google,
    bấm *Create API Key*, copy lại.
 3. **Dán key vào app.** Chỉ nhập một lần, lần sau mở là dùng luôn.

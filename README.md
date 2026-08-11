@@ -13,9 +13,10 @@ Chạy hoàn toàn trên máy bằng **Google Gemini** — chỉ cần nhập AP
 
 <br />
 
-[![Tải MathVision cho Windows](https://img.shields.io/badge/⬇%20%20T%E1%BA%A3i%20MathVision%20cho%20Windows-1.0.0-0b57d0?style=for-the-badge&labelColor=0b57d0&color=0b57d0)](https://github.com/kagtgi/MathVision/releases/latest/download/MathVision-1.0.0.exe)
+[![Tải MathVision cho Windows](https://img.shields.io/badge/⬇%20%20T%E1%BA%A3i%20MathVision%20cho%20Windows-0b57d0?style=for-the-badge&labelColor=0b57d0&color=0b57d0)](https://github.com/kagtgi/MathVision/releases/latest)
 
-*Bản portable · 82 MB · Windows 64-bit · không cần cài đặt*
+*Windows 64-bit · chọn `MathVision-Setup-x.y.z.exe` để cài (tự cập nhật được),
+hoặc `MathVision-x.y.z.exe` bản portable không cần cài*
 
 </div>
 
@@ -23,7 +24,9 @@ Chạy hoàn toàn trên máy bằng **Google Gemini** — chỉ cần nhập AP
 
 ## Bắt đầu trong 3 bước
 
-1. **Tải file** bằng nút phía trên rồi mở lên. Windows báo *"Windows protected your PC"* thì
+1. **Tải file** bằng nút phía trên rồi mở lên. Bản `Setup` cài vào máy và **tự thông báo khi
+   có bản mới** ("Khởi động lại để cập nhật"); bản portable chỉ báo có bản mới, phải tải
+   tay. Windows báo *"Windows protected your PC"* thì
    bấm **More info** → **Run anyway** — file chưa mua chứng chỉ ký số nên Windows cảnh báo,
    không phải dấu hiệu file có hại. Muốn tự kiểm chứng thì xem [mã SHA256 trong Release](https://github.com/kagtgi/MathVision/releases/latest).
 2. **Lấy API key miễn phí** tại **https://aistudio.google.com/apikey** — đăng nhập Google,
@@ -99,9 +102,13 @@ equation do thư viện sinh ra, và đây là cách file mẫu chuẩn đang d�
 ```bash
 npm install
 npm run dev              # http://localhost:3000
-npm run verify           # 6 bộ kiểm chứng, phải PASS hết trước khi commit
-npm run electron:build   # -> release/MathVision-<version>.exe
+npm run verify           # 8 bộ kiểm chứng, phải PASS hết trước khi commit
+npm run verify:ci        # chỉ 4 bộ tự chứa fixture — cũng là bộ CI chạy trên mỗi PR
+npm run electron:build   # -> release/MathVision-Setup-<version>.exe + bản portable
 ```
+
+Muốn góp code thì đọc [CONTRIBUTING.md](CONTRIBUTING.md) — có nói rõ ba harness cần dữ liệu
+đề thi thật nằm ngoài repo.
 
 Cấu trúc: `src/pipeline/` là toàn bộ phần xử lý (thuần hàm, chạy được dưới Node nên test
 được), `src/components/` là UI dùng chung, hai file `*Converter.tsx` là hai chế độ.
@@ -123,12 +130,14 @@ Dựng lại bằng `node scripts/build-fonts.mjs <thư-mục-Google_Sans>`.
 |:---|:---|
 | `verify-pipeline.mjs` | 25 đề đã hoàn chỉnh chạy lại phải ra chính nó (bất biến), cộng fixture cho từng rule |
 | `verify-docx.mjs` | `document.xml` sinh ra phải trùng khớp với bộ sinh docx gốc đã kiểm chứng |
+| `verify-numbering.mjs` | Nhãn "Câu N." dựng bằng numbering của Word, đúng spec đo từ file mẫu |
 | `verify-solver-shape.mjs` | Khối lời giải do máy sinh phải chạy lọt qua bước tái cấu trúc, kể cả đề không chia PHẦN |
 | `verify-vdc.mjs` | docx và .txt định dạng VDC khớp file mẫu của nhóm, và định dạng thường không bị ảnh hưởng |
 | `verify-textlayer.mjs` | Lớp đối chiếu văn bản PDF bắt được lỗi thật mà không báo oan |
 | `verify-download.mjs` | Bấm Tải trong bản đóng gói thì file thật sự được ghi ra đĩa |
+| `verify-update.mjs` | Bản đóng gói có đủ `electron-updater` trong asar, `app-update.yml` và `latest.yml` |
 
-Sửa gì trong `src/pipeline/` hay `electron/` cũng phải chạy lại cả sáu — đó là bằng chứng duy nhất cho việc
+Sửa gì trong `src/pipeline/` hay `electron/` cũng phải chạy lại cả tám — đó là bằng chứng duy nhất cho việc
 định dạng đầu ra không bị lệch khỏi file mẫu.
 
 ## Công nghệ

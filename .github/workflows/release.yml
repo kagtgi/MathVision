@@ -1,0 +1,72 @@
+name: release
+
+on:
+  push:
+    tags: ['v*']
+  # Cho phép chạy tay để thử pipeline mà không cần tạo tag.
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Typecheck
+        run: npm run lint
+
+      - name: Verify (harness tự chứa)
+        run: npm run verify:ci
+
+      # winCodeSign-2.6.0.7z chứa symlink macOS mà 7za trên Windows không tạo được
+      # nếu thiếu SeCreateSymbolicLinkPrivilege. Script này tạo file rỗng thay thế
+      # để cache qua được bước kiểm. BỎ BƯỚC NÀY LÀ BUILD ĐỔ.
+      - name: Vá cache electron-builder
+        run: node scripts/fix-electron-cache.cjs
+
+      - name: Build web
+        run: npm run build
+
+      # `--publish always` cần GH_TOKEN; nó đẩy luôn cả latest.yml và .blockmap —
+      # đúng hai file electron-updater đi tìm.
+      - name: Đóng gói và đẩy lên Release
+        run: npx electron-builder --win --publish always
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Tính SHA256
+        shell: pwsh
+        run: |
+          $files = Get-ChildItem release -Filter *.exe
+          $lines = foreach ($f in $files) {
+            $h = (Get-FileHash $f.FullName -Algorithm SHA256).Hash.ToLower()
+            "$h  $($f.Name)"
+          }
+          $lines | Set-Content release/SHA256.txt -Encoding utf8
+          Get-Content release/SHA256.txt
+
+      - name: Đính SHA256 vào Release
+        if: startsWith(github.ref, 'refs/tags/')
+        run: gh release upload "${{ github.ref_name }}" release/SHA256.txt --clobber
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MathVision-windows
+          path: |
+            release/*.exe
+            release/latest.yml
+            release/SHA256.txt
+          if-no-files-found: error

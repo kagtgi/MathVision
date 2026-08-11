@@ -1,10 +1,17 @@
 {
   "name": "math-vision",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Chuyển đề thi toán từ ảnh hoặc PDF thành file Word đúng chuẩn, tự giải và sinh đáp án chi tiết.",
   "author": "MathVision Team",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kagtgi/MathVision.git"
+  },
+  "engines": {
+    "node": ">=20"
+  },
   "type": "module",
   "main": "electron/main.cjs",
   "scripts": {
@@ -15,12 +22,14 @@
     "lint": "tsc --noEmit",
     "electron:preview": "npm run build && electron .",
     "electron:build": "node scripts/fix-electron-cache.cjs && npm run build && electron-builder --win",
-    "verify": "node scripts/verify-pipeline.mjs && node scripts/verify-docx.mjs && node scripts/verify-solver-shape.mjs && node scripts/verify-vdc.mjs && node scripts/verify-textlayer.mjs && node scripts/verify-download.mjs"
+    "verify": "node scripts/verify-pipeline.mjs && node scripts/verify-docx.mjs && node scripts/verify-numbering.mjs && node scripts/verify-solver-shape.mjs && node scripts/verify-vdc.mjs && node scripts/verify-textlayer.mjs && node scripts/verify-download.mjs && node scripts/verify-update.mjs",
+    "verify:ci": "node scripts/verify-numbering.mjs && node scripts/verify-solver-shape.mjs && node scripts/verify-vdc.mjs && node scripts/verify-textlayer.mjs"
   },
   "dependencies": {
     "@google/genai": "^1.29.0",
     "docx": "^9.6.1",
     "docx-preview": "^0.4.0",
+    "electron-updater": "^6.8.9",
     "framer-motion": "^12.38.0",
     "lucide-react": "^0.546.0",
     "pdfjs-dist": "4.10.38",
@@ -56,10 +65,24 @@
       "dist/**/*",
       "electron/**/*",
       "package.json",
-      "!node_modules/**"
+      "!node_modules/**",
+      "node_modules/{electron-updater,builder-util-runtime,js-yaml,argparse,semver,lodash.escaperegexp,lodash.isequal,lazy-val,fs-extra,jsonfile,graceful-fs,universalify,tiny-typed-emitter,debug,ms,sax}/**/*"
+    ],
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "kagtgi",
+        "repo": "MathVision"
+      }
     ],
     "win": {
       "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
         {
           "target": "portable",
           "arch": [
@@ -69,6 +92,13 @@
       ],
       "icon": "build/icon.ico",
       "artifactName": "MathVision-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "shortcutName": "MathVision",
+      "artifactName": "MathVision-Setup-${version}.${ext}"
     },
     "portable": {
       "unpackDirName": false,

@@ -20,7 +20,8 @@ import {
 } from 'lucide-react';
 
 import { makeFigureResolver, type FigureMap } from '../pipeline/figures';
-import { FORMATS, type DocFormat } from '../pipeline/formats';
+import { resolveFont } from '../pipeline/fonts';
+import WordOptions, { type WordOptionsValue } from './WordOptions';
 import { buildExamDocx } from '../pipeline/mmdToDocx';
 import { buildVdcDocx } from '../pipeline/mmdToDocxVdc';
 import { mmdToVdcTxt } from '../pipeline/mmdToVdcTxt';
@@ -39,8 +40,8 @@ interface Props {
   fileName: string;
   /** Đang chạy pipeline — khoá nút tải để tránh tải bản dở dang. */
   busy?: boolean;
-  format: DocFormat;
-  onFormatChange: (next: DocFormat) => void;
+  wordOptions: WordOptionsValue;
+  onWordOptionsChange: (next: WordOptionsValue) => void;
 }
 
 export default function MmdWorkbench({
@@ -51,9 +52,16 @@ export default function MmdWorkbench({
   figures,
   fileName,
   busy,
-  format,
-  onFormatChange,
+  wordOptions,
+  onWordOptionsChange,
 }: Props) {
+  const { format } = wordOptions;
+  const docxOpts = () => {
+    const font = resolveFont(format, wordOptions.fontId);
+    return format === 'vdc'
+      ? { font, startNumber: wordOptions.startNumber }
+      : { font };
+  };
   const [tab, setTab] = useState<Tab>('preview');
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [previewing, setPreviewing] = useState(false);
@@ -75,7 +83,9 @@ export default function MmdWorkbench({
     const timer = setTimeout(async () => {
       try {
         const resolver = makeFigureResolver(figures);
-        const doc = format === 'vdc' ? buildVdcDocx(mmd, resolver) : buildExamDocx(mmd, resolver);
+        const opts = docxOpts();
+        const doc =
+          format === 'vdc' ? buildVdcDocx(mmd, resolver, opts) : buildExamDocx(mmd, resolver, opts);
         const blob = await Packer.toBlob(doc);
         if (cancelled || !previewRef.current) return;
         const res = await renderDocxPreview(previewRef.current, blob);
@@ -159,7 +169,9 @@ export default function MmdWorkbench({
     setDownloading(true);
     try {
       const resolver = makeFigureResolver(figures);
-      const doc = format === 'vdc' ? buildVdcDocx(mmd, resolver) : buildExamDocx(mmd, resolver);
+      const opts = docxOpts();
+      const doc =
+        format === 'vdc' ? buildVdcDocx(mmd, resolver, opts) : buildExamDocx(mmd, resolver, opts);
       await saveBlob(await Packer.toBlob(doc), `${stem}.docx`);
     } finally {
       setDownloading(false);
@@ -200,20 +212,12 @@ export default function MmdWorkbench({
             </span>
           )}
 
-          <select
-            value={format}
-            onChange={(e) => onFormatChange(e.target.value as DocFormat)}
+          <WordOptions
+            value={wordOptions}
+            onChange={onWordOptionsChange}
             disabled={busy}
-            title={FORMATS.find((f) => f.id === format)?.hint}
-            className="h-[30px] px-2 rounded-lg text-[12.5px]"
-            style={{ border: '1px solid var(--line-strong)', background: 'var(--surface)' }}
-          >
-            {FORMATS.map((f) => (
-              <option key={f.id} value={f.id}>
-                {f.label}
-              </option>
-            ))}
-          </select>
+            variant="inline"
+          />
 
           {format === 'vdc' && (
             <button

@@ -35,8 +35,12 @@ const PAYLOAD = 'X'.repeat(4321);
 
 function findExe() {
   if (process.argv[2]) return path.resolve(process.argv[2]);
+  // Đọc version từ package.json chứ đừng ghim số — ghim "1.0.0" thì mọi bản sau đều
+  // lặng lẽ BỎ QUA và tưởng là pass.
+  const { version } = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
   for (const d of ['release-new', 'release']) {
-    const p = path.join(root, d, 'MathVision-1.0.0.exe');
+    // Chỉ bản portable chạy trực tiếp được; bản Setup là bộ cài, không phải app.
+    const p = path.join(root, d, `MathVision-${version}.exe`);
     if (fs.existsSync(p)) return p;
   }
   return null;
@@ -81,11 +85,31 @@ Write-Output $found`;
   }
 }
 
+/**
+ * Tắt app rồi ĐỢI tiến trình biến mất thật.
+ *
+ * Từ 1.1.0 app giữ single-instance lock (bản cài NSIS cần, để lần mở lại sau khi cập nhật
+ * không chồng lên tiến trình cũ). Bật bản mới khi bản cũ chưa thoát hẳn thì bản mới lấy
+ * không được lock và tự quit — bài kiểm sẽ hỏng thất thường chứ không phải do lỗi thật.
+ */
 function killApp() {
   try {
     execFileSync('taskkill', ['/F', '/IM', 'MathVision.exe'], { stdio: 'ignore' });
   } catch {
     /* không chạy thì thôi */
+  }
+  for (let i = 0; i < 20; i++) {
+    try {
+      const out = execFileSync('tasklist', ['/FI', 'IMAGENAME eq MathVision.exe'], {
+        encoding: 'utf8',
+      });
+      if (!/MathVision\.exe/i.test(out)) return;
+    } catch {
+      return;
+    }
+    execFileSync('powershell', ['-NoProfile', '-Command', 'Start-Sleep -Milliseconds 250'], {
+      stdio: 'ignore',
+    });
   }
 }
 

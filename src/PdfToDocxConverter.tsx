@@ -17,7 +17,7 @@ import { AlertCircle, FileText, Loader2, Upload, X } from 'lucide-react';
 
 import MmdWorkbench from './components/MmdWorkbench';
 import OptionToggles, { type PipelineToggles } from './components/OptionToggles';
-import { type DocFormat } from './pipeline/formats';
+import WordOptions, { DEFAULT_WORD_OPTIONS, type WordOptionsValue } from './components/WordOptions';
 import { cropFigure, type FigureMap } from './pipeline/figures';
 import { ocrPage } from './pipeline/ocr';
 import type { FigureKind } from './pipeline/prompts';
@@ -49,7 +49,8 @@ export default function PdfToDocxConverter({ apiKey, models }: Props) {
   const [notes, setNotes] = useState<string[]>([]);
   const [figures, setFigures] = useState<FigureMap>(new Map());
   const [disagreements, setDisagreements] = useState<string[]>([]);
-  const [format, setFormat] = useState<DocFormat>('k11');
+  const [wordOptions, setWordOptions] = useState<WordOptionsValue>(DEFAULT_WORD_OPTIONS);
+  const format = wordOptions.format;
 
   const [toggles, setToggles] = useState<PipelineToggles>({
     examMode: true,
@@ -339,6 +340,14 @@ export default function PdfToDocxConverter({ apiKey, models }: Props) {
 
           <OptionToggles value={toggles} onChange={setToggles} disabled={busy} />
 
+          {/* Chọn trước khi chạy; đổi lại được ở thanh công cụ khu làm việc. */}
+          <WordOptions
+            value={wordOptions}
+            onChange={setWordOptions}
+            disabled={busy}
+            variant="stack"
+          />
+
           {pdfFile && (
             <button
               onClick={busy ? () => abortRef.current?.abort() : process}
@@ -415,8 +424,8 @@ export default function PdfToDocxConverter({ apiKey, models }: Props) {
           figures={figures}
           fileName={pdfFile?.name ?? 'de-thi'}
           busy={busy}
-          format={format}
-          onFormatChange={setFormat}
+          wordOptions={wordOptions}
+          onWordOptionsChange={setWordOptions}
         />
       ) : (
         <div

@@ -1,5 +1,7 @@
 node_modules/
-build/
+# `build/` KHÔNG được ignore: đó là buildResources của electron-builder và chứa
+# icon.ico mà package.json trỏ vào. Ignore nó thì runner clone sạch sẽ build ra
+# exe không có icon. (Vite xuất ra `dist/`, không liên quan tới `build/`.)
 dist/
 coverage/
 release/

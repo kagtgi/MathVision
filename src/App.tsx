@@ -10,6 +10,7 @@ import { ArrowRight, FileText, Image as ImageIcon, Loader2 } from 'lucide-react'
 
 import ImageToWordConverter from './ImageToWordConverter';
 import PdfToDocxConverter from './PdfToDocxConverter';
+import UpdateToast, { useAppVersion } from './components/UpdateToast';
 import { checkApiKey, MODEL_CHAIN } from './pipeline/geminiClient';
 
 type AppMode = 'image-to-word' | 'pdf-to-word';
@@ -23,6 +24,7 @@ export default function App() {
   const [keyError, setKeyError] = useState<string | null>(null);
   const [models, setModels] = useState<string[]>(MODEL_CHAIN);
   const [mode, setMode] = useState<AppMode>('pdf-to-word');
+  const version = useAppVersion();
 
   // Key đã lưu thì vào thẳng; không gọi mạng lúc khởi động cho nhanh.
   useEffect(() => {
@@ -59,6 +61,8 @@ export default function App() {
   if (!unlocked) {
     return (
       <div className="min-h-screen flex items-center justify-center p-8">
+        {/* Cũng hiện ở màn hình nhập key — bản mới không phải chờ mở khoá mới báo. */}
+        <UpdateToast />
         <div className="w-full max-w-[420px]">
           <img
             src="./logo-mark.png"
@@ -164,10 +168,19 @@ export default function App() {
           </div>
         </div>
 
-        <button onClick={forgetKey} className="btn btn-text">
-          Đổi key
-        </button>
+        <div className="flex items-center gap-2">
+          {version && (
+            <span className="badge badge-neutral" title="Phiên bản đang chạy">
+              v{version}
+            </span>
+          )}
+          <button onClick={forgetKey} className="btn btn-text">
+            Đổi key
+          </button>
+        </div>
       </header>
+
+      <UpdateToast />
 
       {mode === 'pdf-to-word' ? (
         <PdfToDocxConverter apiKey={apiKey} models={models} />

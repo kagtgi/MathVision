@@ -59,14 +59,43 @@ const { default: JSZip } = await import('jszip');
 const zip = await JSZip.loadAsync(buf);
 const doc = await zip.file('word/document.xml').async('string');
 const header = (await zip.file('word/header1.xml')?.async('string')) ?? '';
+const numbering = (await zip.file('word/numbering.xml')?.async('string')) ?? '';
 const hasFooter = Object.keys(zip.files).some((f) => /footer\d*\.xml$/.test(f));
+
+/** rPr của level 0 trong abstractNum đầu tiên có nhãn "Câu". */
+const cauLevelRpr = (() => {
+  for (const m of numbering.matchAll(/<w:abstractNum [\s\S]*?<\/w:abstractNum>/g)) {
+    const lvl = m[0].match(/<w:lvl w:ilvl="0"[\s\S]*?<\/w:lvl>/);
+    if (lvl && /<w:lvlText w:val="Câu /.test(lvl[0])) return lvl[0];
+  }
+  return '';
+})();
+const numberedParas = (doc.match(/<w:numPr>/g) ?? []).length;
 
 const checks = [
   ['font Palatino Linotype', () => /w:ascii="Palatino Linotype"/.test(doc)],
   ['cỡ chữ 23 (11.5pt)', () => /<w:sz w:val="23"\/>/.test(doc)],
   ['lề 850 bốn phía', () => /w:top="850"[^/]*w:right="850"[^/]*w:bottom="850"[^/]*w:left="850"/.test(doc)],
   ['khổ A4 11907x16840', () => /w:w="11907"[^/]*w:h="16840"/.test(doc)],
-  ['KHÔNG in nhãn "Câu N."', () => !/>Câu \d/.test(doc)],
+  // Nhãn "Câu N." phải là NUMBERING, không phải chữ gõ ra. Chỉ assert `!/>Câu \d/` là
+  // GUARD RỖNG: nhãn chuyển sang numbering.xml thì nó vẫn pass mà chẳng chứng minh gì —
+  // đúng cái bẫy đã làm bản 1.0 kết luận sai là "chuẩn VDC bỏ nhãn Câu".
+  ['nhãn "Câu N." không phải chữ trong document.xml', () => !/>Câu \d/.test(doc)],
+  ['có level numbering "Câu %1."', () => /<w:lvlText w:val="Câu %1\."\/>/.test(numbering)],
+  ['nhãn dùng Palatino sz23 đậm xanh', () =>
+    /w:ascii="Palatino Linotype"/.test(cauLevelRpr) &&
+    /<w:sz w:val="23"\/>/.test(cauLevelRpr) &&
+    /<w:b\/>/.test(cauLevelRpr) &&
+    /<w:color w:val="0000FF"\/>/.test(cauLevelRpr)],
+  ['nhãn thụt 992/hanging 992', () =>
+    /<w:ind w:left="992" w:hanging="992"\/>/.test(cauLevelRpr) ||
+    /<w:ind w:hanging="992" w:left="992"\/>/.test(cauLevelRpr)],
+  ['đủ 4 đoạn câu mang numPr', () => numberedParas === 4],
+  ['mọi numId trong document.xml đều có định nghĩa', () =>
+    [...doc.matchAll(/<w:numId w:val="(\d+)"\/>/g)].every((m) =>
+      new RegExp(`<w:num w:numId="${m[1]}"`).test(numbering),
+    )],
+  ['nền khối đề C5E0B3', () => /w:fill="C5E0B3"/.test(doc)],
   ['tab phương án 3330/6030/8370', () => /w:pos="3330"/.test(doc) && /w:pos="6030"/.test(doc) && /w:pos="8370"/.test(doc)],
   ['phương án thụt 900', () => /<w:ind w:left="900"/.test(doc)],
   ['đáp án đúng đỏ FF0000', () => /<w:color w:val="FF0000"\/>/.test(doc)],
@@ -145,8 +174,17 @@ const k11zip = await JSZip.loadAsync(await Packer.toBuffer(buildExamDocx(MMD)));
 const k11doc = await k11zip.file('word/document.xml').async('string');
 // Font mặc định của K11 khai ở styles.xml (docDefaults), không lặp lại trong từng run.
 const k11styles = await k11zip.file('word/styles.xml').async('string');
+const k11num = (await k11zip.file('word/numbering.xml')?.async('string')) ?? '';
+// K11 cũng đã chuyển nhãn sang numbering, nên kiểm nhãn ở numbering.xml chứ không phải
+// `/Câu 1\./` trong document.xml. Nhãn K11 không có Palatino/sz — chỉ đậm + xanh.
 const k11ok =
-  /Times New Roman/.test(k11styles) && /Câu 1\./.test(k11doc) && /Chọn B/.test(k11doc);
-console.log(`\n${k11ok ? GREEN('PASS') : RED('FAIL')}  K11 vẫn giữ Times New Roman, "Câu N.", dòng "Chọn"`);
+  /Times New Roman/.test(k11styles) &&
+  /<w:lvlText w:val="Câu %1\."\/>/.test(k11num) &&
+  /<w:numPr>/.test(k11doc) &&
+  !/>Câu \d/.test(k11doc) &&
+  /Chọn B/.test(k11doc);
+console.log(
+  `\n${k11ok ? GREEN('PASS') : RED('FAIL')}  K11 vẫn giữ Times New Roman, nhãn "Câu N." bằng numbering, dòng "Chọn"`,
+);
 
 process.exit(ok === checks.length && ok2 === txtChecks.length && ok3 === latexCases.length && k11ok ? 0 : 2);

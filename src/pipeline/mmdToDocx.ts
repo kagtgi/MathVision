@@ -28,6 +28,13 @@ import {
 
 import { braceMath, cleanText, segmentLine } from './mmdSegment.ts';
 import { optionsPerLine, parseMmdBlocks } from './mmdBlocks.ts';
+import {
+  cauNumberingConfig,
+  EMPTY_CAU_PLAN,
+  planCauNumbering,
+  type CauNumberingPlan,
+} from './cauNumbering.ts';
+import { fontPreset, type FontPreset } from './fonts.ts';
 
 const BLUE = '0000FF';
 const RED = 'FF0000';
@@ -200,10 +207,13 @@ export function isEmptyParagraph(p: Paragraph): boolean {
 export function mmdToDocxChildren(
   mmd: string,
   resolveFigure: FigureResolver,
+  cauPlan: CauNumberingPlan = EMPTY_CAU_PLAN,
 ): Array<Paragraph | Table> {
   const children: Array<Paragraph | Table> = [];
+  const blocks = parseMmdBlocks(mmd);
 
-  for (const b of parseMmdBlocks(mmd)) {
+  for (let bi = 0; bi < blocks.length; bi++) {
+    const b = blocks[bi];
     switch (b.kind) {
       case 'raw':
         children.push(makeBodyParagraph([new TextRun({ text: b.line })]));
@@ -313,10 +323,27 @@ export function mmdToDocxChildren(
         break;
       }
 
-      case 'cau':
+      case 'cau': {
+        const spacing = b.afterSolution ? { ...BODY_SPACING, before: 160 } : BODY_SPACING;
+        const reference = cauPlan.refOf(bi);
+        if (reference) {
+          // Đoạn dùng numbering: `ind left=0 firstLine=0` triệt tiêu hanging của level để
+          // chữ chạy từ lề, tab 851 đưa nội dung ra sau nhãn — đúng như file mẫu K11.
+          children.push(
+            new Paragraph({
+              numbering: { reference, level: 0 },
+              spacing,
+              alignment: AlignmentType.JUSTIFIED,
+              indent: { left: 0, firstLine: 0 },
+              tabStops: [{ type: TabStopType.LEFT, position: 851 }],
+              children: lineToRuns(b.rest),
+            }),
+          );
+          break;
+        }
         children.push(
           new Paragraph({
-            spacing: b.afterSolution ? { ...BODY_SPACING, before: 160 } : BODY_SPACING,
+            spacing,
             alignment: AlignmentType.JUSTIFIED,
             children: [
               new TextRun({ text: b.prefix + ' ', bold: true, color: BLUE }),
@@ -325,6 +352,7 @@ export function mmdToDocxChildren(
           }),
         );
         break;
+      }
 
       // Chuẩn K11 để nguyên `a) **Đúng**. giải thích` trên một dòng như dòng thường.
       case 'verdict':
@@ -353,14 +381,40 @@ export function mmdToDocxChildren(
 
 const NO_FIGURES: FigureResolver = () => null;
 
-export function buildExamDocx(mmd: string, resolveFigure: FigureResolver = NO_FIGURES): Document {
-  const children = mmdToDocxChildren(mmd, resolveFigure);
+export interface ExamDocxOptions {
+  /** Preset font; mặc định Times New Roman 12pt như file mẫu K11. */
+  font?: FontPreset;
+  /**
+   * Đánh "Câu N." bằng numbering thật của Word. Mặc định BẬT.
+   *
+   * `verify-docx.mjs` truyền `false`: harness đó so từng ký tự `document.xml` với oracle
+   * đóng băng `scripts/ref-mmd2docx.cjs`, thêm `<w:numPr>` sẽ lệch cả 25/25 file. Tắt
+   * numbering ở đó giữ nguyên bảo chứng "mọi thứ còn lại byte-identical" mà không phải sửa
+   * oracle; phần numbering do `verify-numbering.mjs` che.
+   */
+  autoNumberCau?: boolean;
+}
+
+export function buildExamDocx(
+  mmd: string,
+  resolveFigure: FigureResolver = NO_FIGURES,
+  opts: ExamDocxOptions = {},
+): Document {
+  const font = opts.font ?? fontPreset('tnr');
+  const plan =
+    opts.autoNumberCau === false ? EMPTY_CAU_PLAN : planCauNumbering(parseMmdBlocks(mmd));
+  const children = mmdToDocxChildren(mmd, resolveFigure, plan);
   return new Document({
     styles: {
       default: {
-        document: { run: { font: 'Times New Roman', size: 24 } }, // 12pt như file mẫu
+        document: { run: { font: font.name, size: font.size } }, // TNR 12pt như file mẫu
       },
     },
+    numbering: cauNumberingConfig(plan.runs, {
+      font: font.name,
+      size: font.size,
+      color: BLUE,
+    }),
     sections: [
       {
         properties: {

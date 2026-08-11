@@ -8,8 +8,10 @@
  *   header      1 đoạn, canh trái, Palatino Linotype sz 20:
  *               "Thực hiện bởi " + đậm "Group 11 VDC Bhp 2027"; KHÔNG có footer
  *   thân        Palatino Linotype sz 23 (11.5pt)
- *   đề bài      after 120, line 240 auto, ind 0 firstLine 0, contextualSpacing, canh đều
- *               -> KHÔNG in "Câu N."
+ *   đề bài      ind 0 firstLine 0, contextualSpacing, canh đều, nền C5E0B3 phủ cả khối đề
+ *               (đoạn câu + các dòng nối + ý a)-d), KHÔNG phủ lời giải);
+ *               đoạn câu: after 0, line 276 auto, tab trái 900/1170
+ *               -> nhãn "Câu N." bằng NUMBERING, xem `cauNumbering.ts`
  *   phương án   MỘT đoạn, ind 900, after 0, line 276 auto, canh đều,
  *               tab trái 3330 / 6030 / 8370; chữ cái đậm xanh 0000FF
  *               đáp án đúng: đậm ĐỎ FF0000 + highlight vàng + gạch chân,
@@ -22,6 +24,12 @@
  *               chữ đậm đỏ FF0000, MỘT ký tự mỗi ô
  *
  * Không có dòng "Chọn X." — đáp án đúng được đánh dấu ngay trên phương án.
+ *
+ * SỬA 1.1.0 — nhãn "Câu N.": bản trước ghi "chuẩn VDC KHÔNG in Câu N." và bỏ hẳn nhãn. Đó
+ * là LỖI ĐO: phép đo cũ đọc text của `document.xml`, mà nhãn nằm trong `numbering.xml` nên
+ * không thấy. Đo lại `K11_Tuan1.docx` (0 lần `>Câu N` / 50 `<w:numPr>`) và `65-68_Mitu.docx`
+ * (0 / 4, `w:start=65`) thì cả hai đều CÓ nhãn, dạng numbering, Palatino sz23 đậm 0000FF,
+ * `ind left=992 hanging=992`.
  */
 
 import {
@@ -48,30 +56,42 @@ import {
   type FigureResolver,
   type RunStyle,
 } from './mmdToDocx.ts';
+import {
+  cauNumberingConfig,
+  EMPTY_CAU_PLAN,
+  planCauNumbering,
+  type CauNumberingPlan,
+} from './cauNumbering.ts';
+import { fontPreset, type FontPreset } from './fonts.ts';
 
-const FONT = 'Palatino Linotype';
-const SIZE = 23;
+const DEFAULT_FONT = fontPreset('palatino');
 const BLUE = '0000FF';
 const RED = 'FF0000';
 const YELLOW = 'FFFF00';
+/** Nền xanh lá nhạt phủ khối đề, đo từ `65-68_Mitu.docx`. */
+const STEM_FILL = 'C5E0B3';
 
 const BODY_SPACING = { after: 120, line: 240, lineRule: 'auto' as const };
+const CAU_SPACING = { after: 0, line: 276, lineRule: 'auto' as const };
 const OPTION_SPACING = { after: 0, line: 276, lineRule: 'auto' as const };
 const SOL_SPACING = { after: 0, line: 276, lineRule: 'auto' as const };
 const SOL_INDENT = { left: 720 };
+
+const STEM_SHADING = { type: ShadingType.CLEAR, color: 'auto', fill: STEM_FILL } as const;
 
 /** Header mặc định; người dùng đổi được ở UI. */
 export const VDC_HEADER_DEFAULT = { plain: 'Thực hiện bởi ', bold: 'Group 11 VDC Bhp 2027' };
 
 const NO_FIGURES: FigureResolver = () => null;
 
-function bodyParagraph(children: TextRun[]): Paragraph {
+function bodyParagraph(children: TextRun[], shaded = false): Paragraph {
   return new Paragraph({
     spacing: BODY_SPACING,
     alignment: AlignmentType.JUSTIFIED,
     indent: { left: 0, firstLine: 0 },
     contextualSpacing: true,
     tabStops: [{ type: TabStopType.LEFT, position: 851 }],
+    ...(shaded ? { shading: STEM_SHADING } : {}),
     children,
   });
 }
@@ -89,7 +109,7 @@ function solutionParagraph(children: TextRun[]): Paragraph {
  * Ô đáp án của câu trả lời ngắn: mỗi ký tự một ô, đúng 4 ô như file mẫu.
  * Đáp số dài hơn 4 ký tự thì nới thêm ô cho khỏi mất chữ, ngắn hơn thì để ô trống.
  */
-function answerBox(value: string): Table {
+function answerBox(value: string, font: FontPreset): Table {
   const chars = [...value.replace(/\s/g, '')];
   const cellCount = Math.max(4, chars.length);
   const cells = Array.from({ length: cellCount }, (_, i) => {
@@ -101,7 +121,13 @@ function answerBox(value: string): Table {
           spacing: { line: 276, lineRule: 'auto' },
           alignment: AlignmentType.CENTER,
           children: [
-            new TextRun({ text: chars[i] ?? '', bold: true, color: RED, font: FONT, size: SIZE }),
+            new TextRun({
+              text: chars[i] ?? '',
+              bold: true,
+              color: RED,
+              font: font.name,
+              size: font.size,
+            }),
           ],
         }),
       ],
@@ -124,12 +150,32 @@ function answerBox(value: string): Table {
 export function mmdToVdcChildren(
   mmd: string,
   resolveFigure: FigureResolver,
+  cauPlan: CauNumberingPlan = EMPTY_CAU_PLAN,
+  font: FontPreset = DEFAULT_FONT,
 ): Array<Paragraph | Table> {
   const children: Array<Paragraph | Table> = [];
   const optionStyle = (correct: boolean): RunStyle =>
     correct ? { bold: true, color: RED, highlight: 'yellow' } : { bold: true, color: BLUE };
 
-  for (const b of parseMmdBlocks(mmd)) {
+  /**
+   * Nền C5E0B3 phủ từ đoạn câu tới hết phần đề bài. Trong file mẫu, khối tô gồm đoạn câu,
+   * các dòng nối tiếp của đề và các ý a)-d); phương án và lời giải KHÔNG tô. Nên cờ này bật
+   * ở `cau` và tắt ở mốc cấu trúc kế tiếp.
+   */
+  let inStem = false;
+
+  const blocks = parseMmdBlocks(mmd);
+  for (let bi = 0; bi < blocks.length; bi++) {
+    const b = blocks[bi];
+    if (
+      b.kind === 'options' ||
+      b.kind === 'loiGiai' ||
+      b.kind === 'heading' ||
+      b.kind === 'phan' ||
+      b.kind === 'dapSo'
+    ) {
+      inStem = false;
+    }
     switch (b.kind) {
       case 'raw':
         children.push(bodyParagraph([new TextRun({ text: b.line })]));
@@ -187,7 +233,7 @@ export function mmdToVdcChildren(
         break;
 
       case 'dapSo':
-        children.push(answerBox(b.value), new Paragraph({ children: [] }));
+        children.push(answerBox(b.value, font), new Paragraph({ children: [] }));
         break;
 
       case 'options': {
@@ -224,10 +270,35 @@ export function mmdToVdcChildren(
         break;
       }
 
-      // Bỏ hẳn nhãn "Câu N." — chuẩn VDC chỉ giữ nội dung câu hỏi.
       case 'cau': {
+        inStem = true;
         const runs = lineToRuns(b.rest);
-        if (runs.length) children.push(bodyParagraph(runs));
+        const reference = cauPlan.refOf(bi);
+        if (reference) {
+          children.push(
+            new Paragraph({
+              numbering: { reference, level: 0 },
+              spacing: CAU_SPACING,
+              alignment: AlignmentType.JUSTIFIED,
+              indent: { left: 0, firstLine: 0 },
+              contextualSpacing: true,
+              shading: STEM_SHADING,
+              tabStops: [
+                { type: TabStopType.LEFT, position: 900 },
+                { type: TabStopType.LEFT, position: 1170 },
+              ],
+              children: runs,
+            }),
+          );
+          break;
+        }
+        // Dãy không đánh số được: in nhãn thành chữ, cùng kiểu đậm xanh như level numbering.
+        children.push(
+          bodyParagraph(
+            [new TextRun({ text: b.prefix + ' ', bold: true, color: BLUE }), ...runs],
+            true,
+          ),
+        );
         break;
       }
 
@@ -253,7 +324,11 @@ export function mmdToVdcChildren(
 
       case 'text': {
         const runs = lineToRuns(b.line);
-        if (runs.length) children.push(b.inSolution ? solutionParagraph(runs) : bodyParagraph(runs));
+        if (runs.length) {
+          children.push(
+            b.inSolution ? solutionParagraph(runs) : bodyParagraph(runs, inStem),
+          );
+        }
         break;
       }
     }
@@ -272,14 +347,35 @@ export function mmdToVdcChildren(
   return children;
 }
 
+export interface VdcDocxOptions {
+  headerText?: { plain: string; bold: string };
+  /** Preset font; mặc định Palatino Linotype 11.5 như file mẫu. */
+  font?: FontPreset;
+  /** Số câu bắt đầu do người dùng nhập — xem `PlanOptions.startNumber`. */
+  startNumber?: number;
+  /** Tắt numbering (dự phòng cho harness so sánh); mặc định BẬT. */
+  autoNumberCau?: boolean;
+}
+
 export function buildVdcDocx(
   mmd: string,
   resolveFigure: FigureResolver = NO_FIGURES,
-  headerText: { plain: string; bold: string } = VDC_HEADER_DEFAULT,
+  opts: VdcDocxOptions = {},
 ): Document {
-  const children = mmdToVdcChildren(mmd, resolveFigure);
+  const headerText = opts.headerText ?? VDC_HEADER_DEFAULT;
+  const font = opts.font ?? DEFAULT_FONT;
+  const plan =
+    opts.autoNumberCau === false
+      ? EMPTY_CAU_PLAN
+      : planCauNumbering(parseMmdBlocks(mmd), { startNumber: opts.startNumber });
+  const children = mmdToVdcChildren(mmd, resolveFigure, plan, font);
   return new Document({
-    styles: { default: { document: { run: { font: FONT, size: SIZE } } } },
+    styles: { default: { document: { run: { font: font.name, size: font.size } } } },
+    numbering: cauNumberingConfig(plan.runs, {
+      font: font.name,
+      size: font.size,
+      color: BLUE,
+    }),
     sections: [
       {
         properties: {
@@ -293,8 +389,8 @@ export function buildVdcDocx(
             children: [
               new Paragraph({
                 children: [
-                  new TextRun({ text: headerText.plain, size: 20, font: FONT }),
-                  new TextRun({ text: headerText.bold, bold: true, size: 20, font: FONT }),
+                  new TextRun({ text: headerText.plain, size: 20, font: font.name }),
+                  new TextRun({ text: headerText.bold, bold: true, size: 20, font: font.name }),
                 ],
               }),
             ],

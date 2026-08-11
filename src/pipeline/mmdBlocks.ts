@@ -30,7 +30,20 @@ export type MmdBlock =
   | { kind: 'chon'; text: string }
   | { kind: 'dapSo'; text: string; value: string }
   | { kind: 'options'; opts: OptionItem[] }
-  | { kind: 'cau'; prefix: string; rest: string; afterSolution: boolean }
+  /**
+   * `num`/`numRaw`/`punct` để dựng numbering thật của Word (xem `cauNumbering.ts`).
+   * `prefix` giữ nguyên vì những dãy câu không đánh số được (số trùng, số có 0 đứng đầu)
+   * vẫn rơi về in nhãn thành chữ như trước.
+   */
+  | {
+      kind: 'cau';
+      prefix: string;
+      num: number | null;
+      numRaw: string;
+      punct: '.' | ':' | '';
+      rest: string;
+      afterSolution: boolean;
+    }
   /**
    * Ý đúng/sai trong phần lời giải: `a) **Đúng**. giải thích`.
    * `line`/`inSolution` để K11 dựng y như dòng thường (định dạng VDC mới tách riêng
@@ -39,7 +52,8 @@ export type MmdBlock =
   | { kind: 'verdict'; label: string; dung: boolean; explain: string; line: string; inSolution: boolean }
   | { kind: 'text'; line: string; inSolution: boolean };
 
-export const CAU_RE = /^\s*\*{0,2}(Câu\s+\d+\s*[.:]?)\*{0,2}\s*(.*)$/;
+/** Nhóm: 1 = nhãn đầy đủ, 2 = chữ số thô (giữ cả `0` đứng đầu), 3 = dấu, 4 = phần còn lại. */
+export const CAU_RE = /^\s*\*{0,2}(Câu\s+(\d+)\s*([.:]?))\*{0,2}\s*(.*)$/;
 export const OPT_RE = /^\s*(?:\*\*|__)?([A-D])\s*[.)](?:\*\*|__)?\s+(.*)$/;
 export const OPT_UNDER_RE = /^\s*__([A-D])\s*[.)]__\s/;
 export const PHAN_RE =
@@ -193,7 +207,10 @@ export function parseMmdBlocks(mmd: string): MmdBlock[] {
       out.push({
         kind: 'cau',
         prefix: cau[1].replace(/\s+/g, ' '),
-        rest: cau[2],
+        num: Number.parseInt(cau[2], 10),
+        numRaw: cau[2],
+        punct: (cau[3] as '.' | ':' | '') ?? '',
+        rest: cau[4],
         afterSolution: inSolution,
       });
       inSolution = false;

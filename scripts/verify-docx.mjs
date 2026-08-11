@@ -123,7 +123,12 @@ for (const p of files) {
     continue;
   }
   const mmd = fs.readFileSync(p, 'utf8');
-  const doc = buildExamDocx(mmd, makeResolver(p));
+  // `autoNumberCau: false` — oracle `ref-mmd2docx.cjs` in nhãn "Câu N." thành chữ, còn bản
+  // 1.1.0 dùng numbering thật, nên bật numbering ở đây sẽ lệch cả 25/25 file ngay đoạn câu
+  // đầu tiên. Tắt đi để harness này vẫn chứng minh MỌI THỨ CÒN LẠI byte-identical mà không
+  // phải sửa oracle (nó tồn tại đúng để không bị sửa). Phần numbering do
+  // `verify-numbering.mjs` che.
+  const doc = buildExamDocx(mmd, makeResolver(p), { autoNumberCau: false });
   const tsBuf = await Packer.toBuffer(doc);
   const refBuf = fs.readFileSync(refPath);
 

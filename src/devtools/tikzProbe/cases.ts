@@ -274,7 +274,11 @@ export const CASES: ProbeCase[] = [
   {
     id: 'vn-in-comment',
     group: 'chu-viet',
-    why: 'Chữ Việt trong COMMENT có giết hình không? Quyết định phạm vi sanitizer.',
+    why:
+      'ĐO ĐƯỢC: chữ Việt trong COMMENT cũng giết hình. Nghĩa là BẤT KỲ byte ngoài ASCII ở ' +
+      'bất kỳ đâu cũng làm chết — TeX 3.14 không có inputenc. Prompt của app viết bằng tiếng ' +
+      'Việt nên model rất hay chú thích tiếng Việt: rất có thể đây đang là nguyên nhân mất hình.',
+    expect: 'hang',
     code: pic('% Đường cao hạ từ đỉnh\n  \\draw (0,0) -- (2,2);'),
   },
   {

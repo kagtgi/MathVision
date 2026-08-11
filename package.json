@@ -52,7 +52,7 @@
     "subset-font": "^2.5.0",
     "tailwindcss": "^4.1.14",
     "typescript": "~5.8.2",
-    "vite": "^6.2.0",
+    "vite": "^8.2.1",
     "wawoff2": "^2.0.1"
   },
   "build": {

@@ -1,7 +1,7 @@
 {
   "name": "math-vision",
   "private": true,
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Chuyển đề thi toán từ ảnh hoặc PDF thành file Word đúng chuẩn, tự giải và sinh đáp án chi tiết.",
   "author": "MathVision Team",
   "license": "MIT",
@@ -98,7 +98,7 @@
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,
       "shortcutName": "MathVision",
-      "artifactName": "MathVision-Setup-${version}.${ext}"
+      "artifactName": "MathVision-Setup.${ext}"
     },
     "portable": {
       "unpackDirName": false,

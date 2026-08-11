@@ -13,10 +13,12 @@ Chạy hoàn toàn trên máy bằng **Google Gemini** — chỉ cần nhập AP
 
 <br />
 
-[![Tải MathVision cho Windows](https://img.shields.io/badge/⬇%20%20T%E1%BA%A3i%20MathVision%20cho%20Windows-0b57d0?style=for-the-badge&labelColor=0b57d0&color=0b57d0)](https://github.com/kagtgi/MathVision/releases/latest)
+[![Tải MathVision cho Windows](https://img.shields.io/badge/⬇%20%20T%E1%BA%A3i%20MathVision%20cho%20Windows-0b57d0?style=for-the-badge&labelColor=0b57d0&color=0b57d0)](https://github.com/kagtgi/MathVision/releases/latest/download/MathVision-Setup.exe)
 
-*Windows 64-bit · chọn `MathVision-Setup-x.y.z.exe` để cài (tự cập nhật được),
-hoặc `MathVision-x.y.z.exe` bản portable không cần cài*
+*Bấm là tải luôn bản mới nhất · Windows 64-bit · cài xong app tự cập nhật những lần sau*
+
+<sub>Muốn bản **portable** không cần cài, hoặc muốn xem mã SHA256:
+[tất cả file của bản mới nhất](https://github.com/kagtgi/MathVision/releases/latest)</sub>
 
 </div>
 
@@ -24,11 +26,11 @@ hoặc `MathVision-x.y.z.exe` bản portable không cần cài*
 
 ## Bắt đầu trong 3 bước
 
-1. **Tải file** bằng nút phía trên rồi mở lên. Bản `Setup` cài vào máy và **tự thông báo khi
-   có bản mới** ("Khởi động lại để cập nhật"); bản portable chỉ báo có bản mới, phải tải
-   tay. Windows báo *"Windows protected your PC"* thì
-   bấm **More info** → **Run anyway** — file chưa mua chứng chỉ ký số nên Windows cảnh báo,
-   không phải dấu hiệu file có hại. Muốn tự kiểm chứng thì xem [mã SHA256 trong Release](https://github.com/kagtgi/MathVision/releases/latest).
+1. **Bấm nút phía trên** — tải ngay `MathVision-Setup.exe`, rồi mở lên và cài. Từ đó app
+   **tự thông báo khi có bản mới** ("Khởi động lại để cập nhật"), không phải quay lại đây
+   nữa. Windows báo *"Windows protected your PC"* thì bấm **More info** → **Run anyway** —
+   file chưa mua chứng chỉ ký số nên Windows cảnh báo, không phải dấu hiệu file có hại. Muốn
+   tự kiểm chứng thì so với [mã SHA256 trong Release](https://github.com/kagtgi/MathVision/releases/latest).
 2. **Lấy API key miễn phí** tại **https://aistudio.google.com/apikey** — đăng nhập Google,
    bấm *Create API Key*, copy lại.
 3. **Dán key vào app.** Chỉ nhập một lần, lần sau mở là dùng luôn.
@@ -104,7 +106,7 @@ npm install
 npm run dev              # http://localhost:3000
 npm run verify           # 12 bộ kiểm chứng, phải PASS hết trước khi commit
 npm run verify:ci        # chỉ 6 bộ tự chứa fixture — cũng là bộ CI chạy trên mỗi PR
-npm run electron:build   # -> release/MathVision-Setup-<version>.exe + bản portable
+npm run electron:build   # -> release/MathVision-Setup.exe + release/MathVision-<version>.exe
 ```
 
 Muốn góp code thì đọc [CONTRIBUTING.md](CONTRIBUTING.md) — có nói rõ ba harness cần dữ liệu

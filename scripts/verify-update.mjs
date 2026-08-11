@@ -99,7 +99,18 @@ const resources = path.join(unpacked, 'resources');
 {
   const files = fs.readdirSync(buildDir);
   checks.push(['có latest.yml (file electron-updater đi tìm)', files.includes('latest.yml')]);
-  checks.push([`có bộ cài MathVision-Setup-${version}.exe`, files.includes(`MathVision-Setup-${version}.exe`)]);
+  // Tên bộ cài KHÔNG chứa version — đó là điều kiện để link tải trực tiếp trong README
+  // (`/releases/latest/download/MathVision-Setup.exe`) không vỡ mỗi lần lên bản.
+  checks.push(['có bộ cài MathVision-Setup.exe (tên không có version)', files.includes('MathVision-Setup.exe')]);
+  checks.push([
+    'tên bộ cài KHÔNG lẫn version',
+    !files.some((f) => /^MathVision-Setup-\d/.test(f)),
+    files.filter((f) => f.startsWith('MathVision-Setup')).join(', '),
+  ]);
+  checks.push([
+    'latest.yml trỏ đúng tên không version',
+    /url:\s*MathVision-Setup\.exe/.test(fs.readFileSync(path.join(buildDir, 'latest.yml'), 'utf8')),
+  ]);
   checks.push([`vẫn có bản portable MathVision-${version}.exe`, files.includes(`MathVision-${version}.exe`)]);
   checks.push(['có .blockmap cho cập nhật vi phân', files.some((f) => f.endsWith('.blockmap'))]);
 }

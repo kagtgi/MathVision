@@ -1,5 +1,19 @@
 # Lịch sử phiên bản
 
+## 1.2.1
+
+**Nút tải trong README giờ tải file luôn.** Trước đây nó mở trang Release rồi người
+dùng phải tự tìm file. GitHub chỉ cho tải trực tiếp qua đường
+`/releases/latest/download/<đúng tên file>`, mà tên có chứa version thì link vỡ mỗi
+lần lên bản — nên bộ cài đổi tên thành `MathVision-Setup.exe`, không còn số version.
+Bản portable vẫn giữ version trong tên vì người dùng hay để nhiều bản cạnh nhau.
+
+**Giảm gần một nửa chi phí mỗi lần chạy.** Bản 1.2.0 nhồi ba khối luật vẽ hình đầy đủ
+vào prompt gửi kèm **mỗi câu**, làm prompt một câu phình từ 705 lên 4.800 token phần
+luật hình — trong khi phần lớn câu không vẽ hình nào. Đề 30 câu bật giải 2 lượt:
+538.000 → 285.000 token input. Luật đầy đủ chuyển sang lượt soi lại hình, lượt đó chỉ
+chạy cho câu thật sự có hình.
+
 ## 1.2.0
 
 **Hình vẽ lại đúng hơn, và không còn âm thầm mất hình.**

@@ -229,13 +229,24 @@ export function extractFigures(mmd: string): {
   const jsonTail = text.match(/```json\s*(\{[\s\S]*?"figures"[\s\S]*?\})\s*```/);
   if (jsonTail) {
     try {
-      const parsed = JSON.parse(jsonTail[1]) as { figures?: Array<{ id?: string; bbox?: number[] }> };
+      const parsed = JSON.parse(jsonTail[1]) as {
+        figures?: Array<{ id?: string; bbox?: number[]; kind?: string; loai?: string }>;
+      };
       for (const f of parsed.figures ?? []) {
         const id = String(f.id ?? '').replace(/^#/, '');
         const b = f.bbox;
         if (!id || !Array.isArray(b) || b.length !== 4) continue;
+        // Lọc id đúng như đường chính (`FIG_LINE` giới hạn `[\w-]+`). Nhánh này trước đây
+        // nhận MỌI chuỗi, nên id chứa `)` thì `FIG_LINE_NO_BBOX` và regex ảnh ở `qc.ts`
+        // không khớp lại được, còn id chứa `..\` thì thành đường dẫn khi đem đặt tên file.
+        if (!/^[\w-]+$/.test(id)) {
+          warnings.push(`Hình "${id}" trong khối JSON có id không hợp lệ — đã bỏ qua.`);
+          continue;
+        }
         if (figures.some((x) => x.id === id)) continue;
-        figures.push({ id, bbox: [b[0], b[1], b[2], b[3]], kind: 've' });
+        // Đọc `kind` nếu model có khai: hardcode 've' làm ảnh chụp vật thật bị vẽ lại bằng
+        // TikZ, đúng ca "vẽ lại là bịa nội dung".
+        figures.push({ id, bbox: [b[0], b[1], b[2], b[3]], kind: kindOf(`kind=${f.kind ?? f.loai ?? 've'}`) });
       }
       text = text.replace(jsonTail[0], '').trimEnd();
     } catch {

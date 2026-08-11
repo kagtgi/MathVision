@@ -12,7 +12,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useDropzone } from 'react-dropzone';
+import { useDropzone, type FileRejection } from 'react-dropzone';
 import { AlertCircle, FileText, Loader2, Upload, X } from 'lucide-react';
 
 import MmdWorkbench from './components/MmdWorkbench';
@@ -82,12 +82,31 @@ export default function PdfToDocxConverter({ apiKey, models }: Props) {
     setIssues([]);
     setNotes([]);
     setLog([]);
+    // Kết quả của LƯỢT CHẠY, không được sống qua file mới — xem comment cùng chỗ ở
+    // ImageToWordConverter.
+    setDisagreements([]);
     figuresRef.current = new Map();
     setFigures(new Map());
   }, []);
 
+  /** Xem comment cùng chỗ ở ImageToWordConverter: thả file quá cỡ vốn không báo gì. */
+  const onDropRejected = useCallback((rejections: FileRejection[]) => {
+    const codes = new Set(rejections.flatMap((r) => r.errors.map((e) => e.code)));
+    if (codes.has('file-too-large')) {
+      const mb = (rejections[0].file.size / 1024 / 1024).toFixed(1);
+      setError(`File nặng ${mb} MB, vượt mức 50 MB.`);
+    } else if (codes.has('file-invalid-type')) {
+      setError('Chỉ nhận file PDF.');
+    } else if (codes.has('too-many-files')) {
+      setError('Mỗi lần chỉ xử lý được một file.');
+    } else {
+      setError('Không nhận được file này.');
+    }
+  }, []);
+
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
+    onDropRejected,
     accept: { 'application/pdf': ['.pdf'] },
     maxFiles: 1,
     maxSize: MAX_PDF_SIZE_BYTES,
@@ -103,6 +122,7 @@ export default function PdfToDocxConverter({ apiKey, models }: Props) {
     setError(null);
     setMmd('');
     setIssues([]);
+    setDisagreements([]);
     setLog([]);
     figuresRef.current = new Map();
 

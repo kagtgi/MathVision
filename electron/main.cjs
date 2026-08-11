@@ -6,6 +6,12 @@ const path = require('path');
 
 const { createUpdater } = require('./updater.cjs');
 
+// PHẢI gọi trước mọi `app.getPath('userData')`. Không gọi thì `app.name` rơi về
+// `"name": "math-vision"` trong package.json, còn bản electron-builder dùng `productName`
+// -> `MathVision`. Hệ quả: `electron:preview` ghi vào %APPDATA%\math-vision còn bản đóng gói
+// ghi %APPDATA%\MathVision, nên key và lịch sử âm thầm không mang sang được.
+app.setName('MathVision');
+
 /** Thư mục lưu lần trước — giáo viên thường lưu cả loạt đề vào cùng một chỗ. */
 let lastSaveDir = null;
 

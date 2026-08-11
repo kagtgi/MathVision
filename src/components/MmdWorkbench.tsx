@@ -102,7 +102,10 @@ export default function MmdWorkbench({
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [mmd, tab, figures, format]);
+    // `wordOptions` cả cục, không phải riêng `format`: `docxOpts()` đọc cả `fontId` và
+    // `startNumber`, nên để deps là `format` thì đổi font hay số câu bắt đầu không dựng lại
+    // bản xem trước — khung xem trước lệch với file sắp tải.
+  }, [mmd, tab, figures, wordOptions]);
 
   useEffect(() => {
     if (tab !== 'qc') return;

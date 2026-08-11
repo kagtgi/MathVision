@@ -7,7 +7,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useDropzone } from 'react-dropzone';
+import { useDropzone, type FileRejection } from 'react-dropzone';
 import { AlertCircle, Image as ImageIcon, Loader2, Upload, X } from 'lucide-react';
 
 import MmdWorkbench from './components/MmdWorkbench';
@@ -76,6 +76,10 @@ export default function ImageToWordConverter({ apiKey, models }: Props) {
     setIssues([]);
     setNotes([]);
     setLog([]);
+    // `disagreements` là kết quả của LƯỢT CHẠY, không được sống qua ảnh mới: `onMmdChange`
+    // truyền nó lại vào `recheck`, nên thiếu dòng này là cảnh báo "hai lượt giải cho kết quả
+    // khác nhau" của ảnh trước rò sang tài liệu mới.
+    setDisagreements([]);
     figuresRef.current = new Map();
     setFigures(new Map());
 
@@ -92,8 +96,28 @@ export default function ImageToWordConverter({ apiKey, models }: Props) {
       .catch(() => setError('Không đọc được ảnh. Dùng file PNG, JPG hoặc WebP.'));
   }, []);
 
+  /**
+   * File bị react-dropzone loại thì `onDrop` nhận mảng RỖNG, nên câu báo dung lượng ở trên
+   * không bao giờ hiện khi người dùng THẢ file quá cỡ — họ thả xong và không thấy gì.
+   * (Đường dán Ctrl+V gọi `onDrop` trực tiếp nên nó lại chạm được câu báo đó.)
+   */
+  const onDropRejected = useCallback((rejections: FileRejection[]) => {
+    const codes = new Set(rejections.flatMap((r) => r.errors.map((e) => e.code)));
+    if (codes.has('file-too-large')) {
+      const mb = (rejections[0].file.size / 1024 / 1024).toFixed(1);
+      setError(`Ảnh nặng ${mb} MB, vượt mức 20 MB.`);
+    } else if (codes.has('file-invalid-type')) {
+      setError('Chỉ nhận ảnh PNG, JPG hoặc WebP.');
+    } else if (codes.has('too-many-files')) {
+      setError('Mỗi lần chỉ xử lý được một ảnh.');
+    } else {
+      setError('Không nhận được ảnh này.');
+    }
+  }, []);
+
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
+    onDropRejected,
     accept: { 'image/*': ['.png', '.jpg', '.jpeg', '.webp'] },
     maxFiles: 1,
     maxSize: MAX_FILE_SIZE,
@@ -121,6 +145,11 @@ export default function ImageToWordConverter({ apiKey, models }: Props) {
     setError(null);
     setMmd('');
     setLog([]);
+    // Dọn đầu vòng như bên PDF. Thiếu ba dòng này thì chạy lại lần hai còn `issues`,
+    // `disagreements` và `figuresRef` của lượt trước.
+    setIssues([]);
+    setDisagreements([]);
+    figuresRef.current = new Map();
 
     try {
       setStage('Đang đọc ảnh…');

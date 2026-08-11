@@ -9,6 +9,12 @@
  * the two missing macOS symlinks so the cache directory is considered valid.
  *
  * This script is idempotent — safe to run multiple times.
+ *
+ * KHÔNG BAO GIỜ exit khác 0. Đây là bản VÁ cho hạn chế của máy Windows cục bộ, không phải
+ * điều kiện để build. Runner của GitHub Actions tạo symlink được nên chẳng có "partial
+ * extraction" nào để vá — bản trước exit 1 ở đúng chỗ đó và giết luôn workflow release ngay
+ * lần chạy đầu tiên, kèm câu báo "Try running as Administrator" vô nghĩa trên CI. Vá được thì
+ * vá, không thì để electron-builder tự chạy và tự báo lỗi thật của nó.
  */
 
 'use strict';
@@ -49,16 +55,25 @@ const builderBin = process.platform === 'win32'
   : path.resolve('node_modules', '.bin', 'electron-builder');
 
 console.log('[fix-electron-cache] Downloading winCodeSign (may take ~30s on first run)...');
+let probeOutput = '';
 try {
-  execSync(`"${builderBin}" --win --config.win.target=dir`, { stdio: 'pipe' });
-} catch {
-  // Expected to fail due to symlinks — we only needed the download+extraction attempt.
+  // `--publish never`: file này chỉ để kéo cache về. Không có nó thì trên build theo tag,
+  // electron-builder thấy key `publish` và cố đẩy lên Release ngay ở bước dò này — không có
+  // GH_TOKEN nên chết, mà `stdio: 'pipe'` lại nuốt mất lỗi.
+  execSync(`"${builderBin}" --win --config.win.target=dir --publish never`, {
+    stdio: 'pipe',
+    encoding: 'utf8',
+  });
+} catch (err) {
+  // Bước này ĐƯỢC PHÉP fail (symlink) — chỉ cần nó đã tải và giải nén xong.
+  probeOutput = String(err && (err.stderr || err.stdout) ? err.stderr || err.stdout : err);
 }
 
 // ── Find the best partial extraction (temp numeric directory in cache). ───────
 if (!fs.existsSync(CACHE_DIR)) {
-  console.error('[fix-electron-cache] Cache dir not created — check network access and try again.');
-  process.exit(1);
+  console.log('[fix-electron-cache] Chưa có thư mục cache — để electron-builder tự tải.');
+  if (probeOutput) console.log(probeOutput.split('\n').slice(-12).join('\n'));
+  process.exit(0);
 }
 
 const partials = fs
@@ -68,8 +83,10 @@ const partials = fs
   .filter((p) => fs.statSync(p).isDirectory() && fs.readdirSync(p).length > 3);
 
 if (partials.length === 0) {
-  console.error('[fix-electron-cache] No partial extraction found. Try running as Administrator once.');
-  process.exit(1);
+  // Máy tạo được symlink (đúng trường hợp runner GitHub) thì không có gì để vá — bình thường.
+  console.log('[fix-electron-cache] Không có bản giải nén dở — máy này tạo symlink được, bỏ qua.');
+  if (probeOutput) console.log(probeOutput.split('\n').slice(-12).join('\n'));
+  process.exit(0);
 }
 
 // Pick the most complete extraction (most top-level entries)

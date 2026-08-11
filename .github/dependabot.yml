@@ -1,0 +1,20 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      # Gộp cho đỡ ngập PR; ba thứ dưới đây phải xem riêng vì hay vỡ.
+      minor-va-patch:
+        patterns: ['*']
+        update-types: [minor, patch]
+    ignore:
+      # docx 9.6.1 được ghim ở CẢ hai phía của verify-docx.mjs; đổi bản là khác
+      # serializer và lệch ngay phép so từng ký tự.
+      - dependency-name: docx
+      # pdfjs-dist ghim đúng 4.10.38 sau một lần hạ bản có chủ ý.
+      - dependency-name: pdfjs-dist
+      # electron-builder phải khớp electron-updater; nâng thì nâng cùng nhau.
+      - dependency-name: electron-builder

@@ -4,8 +4,31 @@ const { app, BrowserWindow, dialog, ipcMain, shell, session } = require('electro
 const fs = require('fs');
 const path = require('path');
 
+const { createUpdater } = require('./updater.cjs');
+
 /** Thư mục lưu lần trước — giáo viên thường lưu cả loạt đề vào cùng một chỗ. */
 let lastSaveDir = null;
+
+/** Giữ cửa sổ ở phạm vi module để bộ cập nhật đẩy được trạng thái sang giao diện. */
+let mainWindow = null;
+
+const updater = createUpdater({
+  send: (channel, payload) => {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, payload);
+  },
+  log: (msg) => console.log('[updater]', msg),
+});
+
+function setupUpdates() {
+  ipcMain.handle('mv:get-version', () => app.getVersion());
+  ipcMain.handle('mv:update-state', () => updater.getState());
+  ipcMain.handle('mv:check-updates', async () => {
+    await updater.check();
+    return updater.getState();
+  });
+  ipcMain.handle('mv:apply-update', () => updater.apply());
+  updater.start();
+}
 
 /**
  * Lưu file theo yêu cầu của giao diện: hỏi chỗ lưu, ghi ra đĩa, mở thư mục.
@@ -75,7 +98,7 @@ function setupDownloads() {
 }
 
 function createWindow() {
-  const win = new BrowserWindow({
+  const win = (mainWindow = new BrowserWindow({
     width: 1400,
     height: 900,
     minWidth: 1000,
@@ -88,11 +111,14 @@ function createWindow() {
     },
     title: 'MathVision',
     show: false,
-  });
+  }));
 
   win.loadFile(path.join(__dirname, '..', 'dist', 'index.html'));
 
   win.once('ready-to-show', () => win.show());
+  win.on('closed', () => {
+    if (mainWindow === win) mainWindow = null;
+  });
 
   // Open all external links in the system browser, not inside Electron
   win.webContents.setWindowOpenHandler(({ url }) => {
@@ -108,7 +134,20 @@ function createWindow() {
   });
 }
 
+// Một bản chạy một lần. Bản cài NSIS thay file rồi tự mở lại, không khoá thì lần mở lại
+// có thể chồng lên tiến trình cũ chưa thoát hẳn.
+const gotLock = app.requestSingleInstanceLock();
+if (!gotLock) app.quit();
+
+app.on('second-instance', () => {
+  if (!mainWindow) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.focus();
+});
+
 app.whenReady().then(() => {
+  if (!gotLock) return;
+
   // Fix fetch() from file:// origin:
   // Replace null/missing Origin so Google's API accepts the request,
   // and add permissive CORS headers on responses so Chromium doesn't block them.
@@ -131,9 +170,11 @@ app.whenReady().then(() => {
   setupFileSaving();
   setupDownloads();
   createWindow();
+  setupUpdates();
 });
 
 app.on('window-all-closed', () => {
+  updater.stop();
   if (process.platform !== 'darwin') app.quit();
 });
 

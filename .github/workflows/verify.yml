@@ -1,0 +1,41 @@
+name: verify
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# PR mới đẩy thêm commit thì huỷ lượt chạy cũ.
+concurrency:
+  group: verify-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    # windows-latest vì app chỉ đóng gói cho Windows và một vài harness đọc
+    # đường dẫn kiểu Windows.
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Typecheck
+        run: npm run lint
+
+      # Chỉ bốn harness tự chứa fixture. verify-pipeline/verify-docx cần 25 đề thi
+      # thật (không đưa lên repo được) và verify-download cần một bản .exe đã build
+      # cùng hộp thoại lưu file của Windows — hai thứ đó chạy tay trước khi mở PR,
+      # xem CONTRIBUTING.md.
+      - name: Verify (harness tự chứa)
+        run: npm run verify:ci
+
+      # Bản web build được thì bản Electron cũng nạp được dist/.
+      - name: Build
+        run: npm run build

@@ -1,0 +1,59 @@
+name: Báo lỗi
+description: App chạy sai, hoặc file Word xuất ra không đúng
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: Bị gì
+      description: Bạn làm gì, app ra sao, đáng lẽ phải ra sao.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Chế độ
+      options:
+        - PDF sang Word
+        - Ảnh sang Word
+        - Không rõ / cả hai
+    validations:
+      required: true
+
+  - type: dropdown
+    id: format
+    attributes:
+      label: Định dạng Word đang chọn
+      options:
+        - Định dạng thường
+        - Định dạng VDC
+        - Không rõ
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Phiên bản
+      description: Xem ở góc trên bên phải cửa sổ app.
+      placeholder: 1.1.0
+    validations:
+      required: true
+
+  - type: textarea
+    id: log
+    attributes:
+      label: Nhật ký xử lý
+      description: Mở "Nhật ký xử lý" ở cột trái rồi dán vào đây.
+      render: text
+
+  - type: textarea
+    id: files
+    attributes:
+      label: File để tái hiện
+      description: |
+        Kéo file .docx sai hoặc ảnh chụp màn hình vào đây.
+
+        **Đừng đính kèm đề còn trong thời gian bảo mật.** Nếu đề chưa thi, hãy
+        cắt lấy đúng một câu bị lỗi thay vì gửi cả đề.

@@ -1,0 +1,25 @@
+name: Đề xuất tính năng
+description: Muốn app làm thêm được việc gì
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Việc đang phải làm tay
+      description: Mô tả công đoạn bạn đang phải tự làm, chứ không phải giải pháp bạn hình dung.
+    validations:
+      required: true
+
+  - type: textarea
+    id: idea
+    attributes:
+      label: Bạn nghĩ app nên làm gì
+
+  - type: textarea
+    id: sample
+    attributes:
+      label: File mẫu
+      description: |
+        Nếu là chuyện định dạng Word, **file mẫu là thứ quan trọng nhất**: mọi
+        hằng số định dạng trong dự án đều đo từ file thật, không phỏng đoán. Có
+        file .docx đúng ý bạn thì đính kèm vào đây.

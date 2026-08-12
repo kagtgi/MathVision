@@ -57,7 +57,7 @@ export default function UpdateToast() {
             {downloading
               ? `${state.percent ?? 0}%`
               : portable
-                ? 'Bản portable không tự cập nhật được — tải bản mới về rồi thay file cũ.'
+                ? `Bạn đang dùng ${state.currentVersion}. Bấm để tải, thay file và mở lại bản mới.`
                 : `Bạn đang dùng ${state.currentVersion}.`}
           </p>
         </div>
@@ -90,9 +90,13 @@ export default function UpdateToast() {
       )}
 
       {portable && (
-        <button onClick={apply} disabled={applying} className="btn btn-tonal btn-sm w-full mt-2.5">
-          <Download className="w-3.5 h-3.5" />
-          Tải bản mới
+        <button onClick={apply} disabled={applying} className="btn btn-primary btn-sm w-full mt-2.5">
+          {applying ? (
+            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+          ) : (
+            <Download className="w-3.5 h-3.5" />
+          )}
+          Cập nhật và mở lại
         </button>
       )}
     </div>

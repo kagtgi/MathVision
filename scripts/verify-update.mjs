@@ -19,8 +19,9 @@
  * Usage: node scripts/verify-update.mjs
  */
 
-import { execFileSync, spawn } from 'node:child_process';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
@@ -42,8 +43,133 @@ function findBuildDir() {
   return null;
 }
 
-const buildDir = findBuildDir();
 console.log('=== Luồng cập nhật của bản đóng gói ===');
+
+// ─── Phần THUẦN: chạy kể cả khi chưa build ──────────────────────────────────
+//
+// Hai hàm dưới đây quyết định app portable TẢI FILE NÀO và có CHẠY nó hay không. Sai chỗ nào
+// cũng hỏng im lặng theo kiểu tệ nhất: chọn nhầm asset là tải bản CÀI rồi chạy như bản portable;
+// đọc nhầm hash là hoặc chặn oan một file lành, hoặc tệ hơn — chạy một file chưa đối chiếu.
+
+const { parseSha256, PORTABLE_ASSET, isNewer, swapCommand, encodeCommand } = await import(
+  '../electron/updater.cjs'
+).then((m) => m.default ?? m);
+
+const SUMS = `${'a'.repeat(64)}  MathVision-1.3.0.exe
+${'b'.repeat(64)}  MathVision-Setup.exe
+`;
+
+const pure = [
+  ['chọn đúng file portable', PORTABLE_ASSET.test('MathVision-1.3.0.exe')],
+  ['KHÔNG chọn nhầm bản cài', !PORTABLE_ASSET.test('MathVision-Setup.exe')],
+  ['KHÔNG chọn nhầm bản cài có số', !PORTABLE_ASSET.test('MathVision-Setup-1.2.0.exe')],
+  ['KHÔNG chọn nhầm blockmap', !PORTABLE_ASSET.test('MathVision-1.3.0.exe.blockmap')],
+  ['đọc đúng hash của portable', parseSha256(SUMS, 'MathVision-1.3.0.exe') === 'a'.repeat(64)],
+  ['đọc đúng hash của bản cài', parseSha256(SUMS, 'MathVision-Setup.exe') === 'b'.repeat(64)],
+  // Không tìm được dòng thì PHẢI trả rỗng để bên gọi huỷ — trả bừa là chạy file chưa kiểm.
+  ['không có dòng khớp -> chuỗi rỗng', parseSha256(SUMS, 'MathVision-9.9.9.exe') === ''],
+  ['hash méo -> chuỗi rỗng', parseSha256(`zz  MathVision-1.3.0.exe`, 'MathVision-1.3.0.exe') === ''],
+  ['file rỗng -> chuỗi rỗng', parseSha256('', 'MathVision-1.3.0.exe') === ''],
+  ['1.3.0 mới hơn 1.2.0', isNewer('1.3.0', '1.2.0')],
+  ['1.3.0 không mới hơn chính nó', !isNewer('1.3.0', '1.3.0')],
+];
+
+let pureOk = 0;
+for (const [name, pass] of pure) {
+  if (pass) pureOk++;
+  else console.log(`  ${RED('FAIL')} ${name}`);
+}
+console.log(
+  `${pureOk === pure.length ? GREEN('PASS') : RED('FAIL')}  ${pureOk}/${pure.length} tiêu chí chọn file + đối chiếu hash`,
+);
+if (pureOk !== pure.length) process.exit(2);
+
+// ─── Thay file THẬT, trên một exe ĐANG CHẠY ─────────────────────────────────
+//
+// Đây là ca đắt nhất và cũng là ca duy nhất đáng tin. Bản portable tự cập nhật bằng cách giao
+// cho PowerShell một lệnh chạy sau khi app thoát; toàn bộ tính năng đứng hay đổ ở lệnh đó, mà
+// đọc mã thì không thấy được. Nên: chép `ping.exe` thành "bản cũ", CHẠY nó lên (file exe đang
+// chạy bị Windows khoá — đúng cảnh thật), rồi bắt lệnh thay file làm việc của nó.
+//
+// Điều phải chứng minh không chỉ là "đổi được file", mà là **hỏng thì không mất app**: bản mới
+// vào chỗ trước, bản cũ dọn sau.
+
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mv-swap-'));
+const SYS = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32');
+const swap = [];
+
+function runPs(src) {
+  return spawnSync('powershell.exe', [
+    '-NoProfile',
+    '-NonInteractive',
+    '-EncodedCommand',
+    encodeCommand(src),
+  ]);
+}
+
+try {
+  // Đường dẫn CÓ DẤU TIẾNG VIỆT và có dấu cách — đúng cảnh `C:\Users\Nguyễn Văn A\Downloads`,
+  // và chính là chỗ script `.cmd` bản trước hỏng vì bảng mã.
+  const dir = path.join(tmp, 'Tệp tải về của Nguyễn');
+  fs.mkdirSync(dir);
+  const old = path.join(dir, 'MathVision-1.2.0.exe');
+  const dest = path.join(dir, 'MathVision-1.3.0.exe');
+  const dl = `${dest}.download`;
+  fs.copyFileSync(path.join(SYS, 'ping.exe'), old);
+  fs.writeFileSync(dl, 'BẢN MỚI');
+
+  // Giữ bản cũ trong trạng thái BỊ KHOÁ vài giây, để bắt vòng lặp thử-lại phải thật sự đợi.
+  const held = spawn(old, ['-n', '4', '127.0.0.1'], { stdio: 'ignore', detached: true });
+  const r = runPs(
+    swapCommand({ download: dl, dest, old }).replace(/^Start-Process .*$/m, '# (bỏ bước mở app)'),
+  );
+  try {
+    held.kill();
+  } catch {
+    /* đã tự thoát */
+  }
+
+  swap.push(['lệnh thay file chạy trót lọt', r.status === 0]);
+  swap.push(['bản mới vào đúng chỗ', fs.existsSync(dest)]);
+  swap.push([
+    'bản mới đúng nội dung đã tải',
+    fs.existsSync(dest) && fs.readFileSync(dest, 'utf8') === 'BẢN MỚI',
+  ]);
+  swap.push(['đã dọn bản cũ dù nó bị khoá lúc đầu', !fs.existsSync(old)]);
+  swap.push(['không để sót file .download', !fs.existsSync(dl)]);
+
+  // Chép hỏng thì PHẢI còn nguyên bản cũ. Dựng cảnh hỏng bằng cách cho `dl` không tồn tại.
+  const dir2 = path.join(tmp, 'hong');
+  fs.mkdirSync(dir2);
+  const old2 = path.join(dir2, 'MathVision-1.2.0.exe');
+  fs.writeFileSync(old2, 'BẢN CŨ');
+  const r2 = runPs(
+    swapCommand({
+      download: path.join(dir2, 'khong-he-co.exe.download'),
+      dest: path.join(dir2, 'MathVision-1.3.0.exe'),
+      old: old2,
+    }),
+  );
+  swap.push(['chép hỏng thì báo lỗi', r2.status !== 0]);
+  swap.push([
+    'chép hỏng thì KHÔNG mất bản cũ',
+    fs.existsSync(old2) && fs.readFileSync(old2, 'utf8') === 'BẢN CŨ',
+  ]);
+} finally {
+  fs.rmSync(tmp, { recursive: true, force: true });
+}
+
+let swapOk = 0;
+for (const [name, pass] of swap) {
+  if (pass) swapOk++;
+  else console.log(`  ${RED('FAIL')} ${name}`);
+}
+console.log(
+  `${swapOk === swap.length ? GREEN('PASS') : RED('FAIL')}  ${swapOk}/${swap.length} tiêu chí thay file portable (chạy thật)`,
+);
+if (swapOk !== swap.length) process.exit(2);
+
+const buildDir = findBuildDir();
 if (!buildDir) {
   console.log(
     `${DIM('BỎ QUA')} chưa có bản build ${version} — chạy "npm run electron:build" trước.`,

@@ -1,5 +1,47 @@
 # Lịch sử phiên bản
 
+## 1.3.2
+
+**Hết chuyện ảnh chụp chữ đề chen vào chỗ đáng ra là hình.** Trên đề thử THPT 2026 của chuyên
+Lê Hồng Phong, chỗ hình chóp của Câu 4 lại là một tấm ảnh chụp bảng số liệu Câu 1 cùng mấy dòng
+phương án A-D. Nguyên nhân đo được: model khoanh vùng hình **đúng hình dạng, sai dòng** — nó trả
+`[38,0 · 33,1 · 23,0 · 15,5]` trong khi hình thật ở `[38 · 62,2 · 23 · 15,5]`. **Ba trên bốn số
+trùng khít tới một chữ số thập phân, chỉ toạ độ dọc lệch 29 điểm.** Nói cách khác model nhận ra
+hình và đo đúng khổ, chỉ đặt sai chỗ.
+
+Điều làm nó thành lỗi im lặng: app **không có phép kiểm nào** xem bản cắt có thật là hình hay
+không. Ô kiểm "Hình không có dữ liệu" chỉ bắt ảnh treo id, mà đây thì id nào cũng có dữ liệu —
+nên tab Kiểm tra báo sạch trong khi file Word có một tấm ảnh vô nghĩa.
+
+Nay mỗi bản cắt phải qua một cửa: nếu vùng cắt chứa **từ 2 dòng chữ xếp đều** trở lên thì app xin
+model khoanh lại một lượt, kèm đúng lý do và toạ độ hộp đã sai. Vẫn sai thì **bỏ hình kèm cảnh
+báo có số câu** — thiếu hình thì thầy biết ngay phải vẽ tay câu nào, còn ảnh rác thì phải tự tìm
+ra rồi xoá. Đo trên chính ca đã lỗi: **3/3 lượt xin lại đều tìm về đúng hình chóp**.
+
+Cửa này chốt bằng số đo, không bằng cảm nhận:
+
+- **Tỉ lệ mực không dùng được** — đã đo và nó không tách được gì: hình thật 4,1-11,6%, dải chữ
+  5,4-15,9%, trùm hẳn lên nhau. Chữ và nét vẽ đều là mực đen trên giấy trắng. Thứ tách được là
+  **cấu trúc hàng**: chữ in thành dải ngang cao đều, trải quá nửa bề rộng, cách nhau bằng khoảng
+  trắng sạch.
+- **Không đối chiếu được lớp văn bản PDF** — đề này không có lớp văn bản nào (0 mảnh chữ trên
+  trang 1), nên phép đối chứng văn bản của app vốn đã im lặng bỏ qua. Đề scan cũng vậy. Pixel là
+  thứ luôn có.
+- **Phán quyết trên hộp GỐC model khai, không phải hộp đã nới lề.** Lề 2% mỗi phía là ~34 px trên
+  trang A4 — vừa đủ kéo trọn một dòng chữ kề bên vào. Đo trên chính hình chóp Câu 4: hộp **đúng**
+  đếm được 2 dòng chữ khi nới lề (đủ để bị chặn oan, tức xoá một hình có thật) nhưng **0** khi đo
+  hộp gốc. Lề vẫn giữ cho ảnh khỏi cắt cụt.
+- **Ngưỡng đặt ở phía an toàn.** Trên hộp gốc: 13 hình thật của hai đề, đủ bốn họ hình học không
+  gian / đồ thị / bảng biến thiên / hình vẽ khác — **cao nhất 1 dòng, không hình nào bị chặn**;
+  40 dải chữ lấy tuỳ ý thì bắt được 30. Bỏ sót vài ca còn hơn xoá một hình có thật.
+
+Chạy thật lại cả hai đề sau khi sửa: **8/8 và 6/6 hình cắt đúng, tab Kiểm tra sạch**, và soi cả
+14 ảnh nhúng trong hai file Word thì đều là hình thật.
+
+Bốn biến thể cố tình làm sai đều bị harness bắt — trong đó hai ca lúc đầu **lọt qua** nên phải bổ
+sung: bỏ trần chiều cao dải (làm hai khối hình xếp dọc bị đọc thành hai dòng chữ) và bỏ phép kiểm
+số hữu hạn khi đọc toạ độ khoanh lại.
+
 ## 1.3.1
 
 **Bản portable giờ tự cập nhật bằng một nút bấm.** Trước bản này nút "Cập nhật" của bản

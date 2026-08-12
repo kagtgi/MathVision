@@ -24,6 +24,7 @@ import OptionToggles, {
 } from './components/OptionToggles';
 import WordOptions, { DEFAULT_WORD_OPTIONS, type WordOptionsValue } from './components/WordOptions';
 import { cropFigure, type FigureMap } from './pipeline/figures';
+import { textBlockReason } from './pipeline/cropGate';
 import { ocrPage } from './pipeline/ocr';
 import { recheck, runTextPipeline } from './pipeline/runPipeline';
 import type { QcIssue } from './pipeline/qc';
@@ -238,8 +239,19 @@ export default function ImageToWordConverter({ apiKey, models, restore, restoreS
       const warnings = [...res.warnings];
       for (const f of res.figures) {
         const entry = await cropFigure(fullResRef.current, f.bbox);
-        if (entry) map.set(f.id, entry);
-        else warnings.push(`Hình ${f.id}: vùng cắt không hợp lệ — đã bỏ.`);
+        if (!entry) {
+          warnings.push(`Hình ${f.id}: vùng cắt không hợp lệ — đã bỏ.`);
+          continue;
+        }
+        // Cùng cửa như chế độ PDF (xem `cropGate.ts`), nhưng KHÔNG xin khoanh lại: ở đây chỉ có
+        // một ảnh và chính nó là toàn bộ đầu vào, nên bỏ hình rồi báo là đủ — thầy tự cắt lại
+        // ảnh rồi chạy lượt nữa còn nhanh hơn một lượt hỏi model.
+        const why = entry.stats ? textBlockReason(entry.stats) : null;
+        if (why) {
+          warnings.push(`Hình ${f.id}: khoanh sai vùng — ${why}. Đã bỏ hình này.`);
+          continue;
+        }
+        map.set(f.id, entry);
       }
       figuresRef.current = map;
       setFigures(new Map(map));

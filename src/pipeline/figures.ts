@@ -6,6 +6,8 @@
  * mà người dùng không biết.
  */
 
+import type { CropStats } from './cropGate.ts';
+import { cropStats } from './cropGate.ts';
 import type { FigureData } from './mmdToDocx.ts';
 import { pngSize } from './mmdToDocx.ts';
 
@@ -20,6 +22,12 @@ export type FigureSource = 'crop' | 'tikz' | 'genai';
 
 export interface FigureEntry extends FigureData {
   source: FigureSource;
+  /**
+   * Số đo cấu trúc hàng của bản CẮT, để bên gọi soi xem có cắt nhầm vào chữ đề không.
+   * Chỉ đường cắt đặt trường này; bản TikZ và ảnh AI thì không có (chúng không đến từ trang).
+   * Không được lưu vào lịch sử — `serialize.ts` chỉ chép ra các trường nó liệt kê.
+   */
+  stats?: CropStats;
 }
 
 export type FigureMap = Map<string, FigureEntry>;
@@ -35,15 +43,16 @@ export function padClampBbox(
   bbox: Bbox,
   width: number,
   height: number,
+  pad = PAD_PERCENT,
 ): { x: number; y: number; w: number; h: number } | null {
   const [bx, by, bw, bh] = bbox;
   if (![bx, by, bw, bh].every((v) => Number.isFinite(v))) return null;
   if (bw <= 0 || bh <= 0) return null;
 
-  const x0 = ((bx - PAD_PERCENT) / 100) * width;
-  const y0 = ((by - PAD_PERCENT) / 100) * height;
-  const x1 = ((bx + bw + PAD_PERCENT) / 100) * width;
-  const y1 = ((by + bh + PAD_PERCENT) / 100) * height;
+  const x0 = ((bx - pad) / 100) * width;
+  const y0 = ((by - pad) / 100) * height;
+  const x1 = ((bx + bw + pad) / 100) * width;
+  const y1 = ((by + bh + pad) / 100) * height;
 
   const x = Math.max(0, Math.round(x0));
   const y = Math.max(0, Math.round(y0));
@@ -68,10 +77,29 @@ export async function cropFigure(
   if (!ctx) return null;
   ctx.drawImage(canvas, rect.x, rect.y, rect.w, rect.h, 0, 0, rect.w, rect.h);
 
+  // Đo cấu trúc hàng NGAY ĐÂY, lúc còn pixel trong tay: sau khi nén PNG thì bên gọi muốn đo
+  // lại phải giải mã thêm một lượt. Chỉ ĐO, không phán quyết — chính sách nằm ở chỗ gọi.
+  //
+  // ĐO TRÊN HỘP GỐC, KHÔNG PHẢI HỘP ĐÃ NỚI LỀ. Lề 2% mỗi phía là ~34 px trên trang A4 dựng ở
+  // scale 2 — vừa đủ kéo trọn một dòng chữ kề bên vào. Đo thật trên hình chóp của Câu 4 đề
+  // chuyên Lê Hồng Phong: hộp đúng `[38, 63.5, 23, 15.5]` đếm được **2** dải chữ khi nới lề
+  // (đủ để bị chặn oan, tức XOÁ một hình có thật) nhưng **0** khi đo hộp gốc. Lề vẫn giữ cho
+  // ảnh khỏi cắt cụt; phán quyết thì dựa vào đúng vùng model đã khai.
+  const inner = padClampBbox(bbox, canvas.width, canvas.height, 0) ?? rect;
+  const ix = Math.min(Math.max(0, inner.x - rect.x), rect.w - 1);
+  const iy = Math.min(Math.max(0, inner.y - rect.y), rect.h - 1);
+  const iw = Math.max(1, Math.min(inner.w, rect.w - ix));
+  const ih = Math.max(1, Math.min(inner.h, rect.h - iy));
+  const px = ctx.getImageData(ix, iy, iw, ih).data;
+  const gray = new Uint8ClampedArray(iw * ih);
+  for (let i = 0, g = 0; i < px.length; i += 4, g++) {
+    gray[g] = (px[i] * 299 + px[i + 1] * 587 + px[i + 2] * 114) / 1000;
+  }
+
   const blob = await new Promise<Blob | null>((resolve) => out.toBlob(resolve, 'image/png'));
   if (!blob) return null;
   const bytes = new Uint8Array(await blob.arrayBuffer());
-  return { bytes, ...pngSize(bytes), source: 'crop' };
+  return { bytes, ...pngSize(bytes), source: 'crop', stats: cropStats(gray, iw, ih) };
 }
 
 /** Data URL để hiện trong tab Xem trước. */

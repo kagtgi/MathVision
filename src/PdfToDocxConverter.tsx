@@ -29,6 +29,8 @@ import {
   type FigureOutcome,
 } from './pipeline/figures';
 import { buildFigureContexts, type FigureContext } from './pipeline/figureContext';
+import { textBlockReason } from './pipeline/cropGate';
+import { refineFigureBbox } from './pipeline/refineBbox';
 import { upgradeFigure } from './pipeline/upgradeFigure';
 import { ocrPage } from './pipeline/ocr';
 import type { FigureKind } from './pipeline/prompts';
@@ -265,9 +267,47 @@ export default function PdfToDocxConverter({
       for (const job of figureJobs) {
         const canvas = canvases.get(job.page);
         if (!canvas) continue;
-        const entry = await cropFigure(canvas, job.bbox);
-        if (entry) map.set(job.id, entry);
-        else allWarnings.push(`Hình ${job.id}: vùng cắt không hợp lệ — đã bỏ.`);
+        let entry = await cropFigure(canvas, job.bbox);
+        if (!entry) {
+          allWarnings.push(`Hình ${job.id}: vùng cắt không hợp lệ — đã bỏ.`);
+          continue;
+        }
+
+        // Cửa chống "khoanh đúng hình dạng, sai dòng" — xem `cropGate.ts`. Không có phép kiểm
+        // này thì một tấm ảnh chụp chữ đề đi thẳng vào Word mà QC không hé lời nào, vì id vẫn
+        // có dữ liệu. Chỉ chạy cho ảnh CẮT; bản TikZ không đi qua đây.
+        let why = entry.stats ? textBlockReason(entry.stats) : null;
+        if (why) {
+          const num = figureContexts.get(job.id)?.num;
+          addLog(`[hình ${job.id}] ${why} — xin khoanh lại`);
+          const fixed = await refineFigureBbox(
+            apiKey,
+            {
+              imageBase64: base64.get(job.page)!,
+              mimeType: 'image/jpeg',
+              badBbox: job.bbox,
+              why,
+              context: figureContexts.get(job.id)?.text,
+            },
+            { signal: controller.signal, onLog: addLog, models, label: `khoanh lại ${job.id}` },
+          );
+          const retry = fixed ? await cropFigure(canvas, fixed) : null;
+          const stillWhy = retry?.stats ? textBlockReason(retry.stats) : null;
+          if (retry && !stillWhy) {
+            entry = retry;
+            why = null;
+            addLog(`[hình ${job.id}] khoanh lại đạt: [${fixed!.join(', ')}]`);
+          } else {
+            // Thà THIẾU hình còn hơn có ảnh chụp chữ đề: thiếu thì QC báo "Hình không có dữ
+            // liệu" và thầy biết phải vẽ tay câu nào, còn ảnh rác thì phải tự tìm ra rồi xoá.
+            allWarnings.push(
+              `Hình ${job.id}${num ? ` (câu ${num})` : ''}: khoanh sai vùng — ${why}. ` +
+                `Đã bỏ hình này, câu đó cần vẽ tay.`,
+            );
+            continue;
+          }
+        }
+        map.set(job.id, entry);
       }
       figuresRef.current = map;
       setFigures(new Map(map));

@@ -24,6 +24,8 @@ import { ocrPage } from '../src/pipeline/ocr.ts';
 import { runTextPipeline } from '../src/pipeline/runPipeline.ts';
 import { buildExamDocx, pngSize } from '../src/pipeline/mmdToDocx.ts';
 import { makeFigureResolver, padClampBbox } from '../src/pipeline/figures.ts';
+import { cropStats, textBlockReason } from '../src/pipeline/cropGate.ts';
+import { refineFigureBbox } from '../src/pipeline/refineBbox.ts';
 import { checkApiKey } from '../src/pipeline/geminiClient.ts';
 
 const GREEN = (s) => `\x1b[32m${s}\x1b[0m`;
@@ -112,27 +114,77 @@ for (const [i, file] of files.entries()) {
 // Thật ra cắt được: `padClampBbox` là hàm THUẦN (bbox phần trăm -> ô pixel) và `sharp` đã là
 // devDependency. Chỉ TikZ mới cần DOM, còn ảnh cắt — tức lưới an toàn — thì không.
 const figures = new Map();
+/** Đo cửa `cropGate` trên HỘP GỐC — cùng chỗ và cùng cách app làm (xem `cropFigure`). */
+const gateOf = async (file, bbox, W, Hh) => {
+  const raw = padClampBbox(bbox, W, Hh, 0);
+  if (!raw) return null;
+  const { data, info } = await sharp(file)
+    .extract({ left: raw.x, top: raw.y, width: raw.w, height: raw.h })
+    .grayscale()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  return textBlockReason(cropStats(data, info.width, info.height));
+};
+const cut = async (file, bbox, W, Hh) => {
+  const rect = padClampBbox(bbox, W, Hh);
+  if (!rect) return null;
+  // sharp đòi {left,top,width,height}; `padClampBbox` trả {x,y,w,h}.
+  const png = await sharp(file)
+    .extract({ left: rect.x, top: rect.y, width: rect.w, height: rect.h })
+    .png()
+    .toBuffer();
+  const bytes = new Uint8Array(png);
+  return { bytes, ...pngSize(bytes), source: 'crop' };
+};
+
+let dropped = 0;
+let refined = 0;
 for (const job of figureJobs) {
   const file = files[job.page];
   if (!file) continue;
   try {
-    const meta = await sharp(file).metadata();
-    const rect = padClampBbox(job.bbox, meta.width, meta.height);
-    if (!rect) continue;
-    const png = await sharp(file)
-      .extract({ left: rect.x, top: rect.y, width: rect.w, height: rect.h })
-      .png()
-      .toBuffer();
-    const bytes = new Uint8Array(png);
-    figures.set(job.id, { bytes, ...pngSize(bytes), source: 'crop' });
+    const { width: W, height: Hh } = await sharp(file).metadata();
+    let bbox = job.bbox;
+    let why = await gateOf(file, bbox, W, Hh);
+    if (why) {
+      // Cùng đường như app: khoanh sai vùng thì xin lại một lượt, vẫn sai thì BỎ hình chứ không
+      // chở ảnh chụp chữ đề vào file Word.
+      console.log(DIM(`   hình ${job.id}: ${why} — xin khoanh lại`));
+      const fixed = await refineFigureBbox(
+        apiKey,
+        {
+          imageBase64: fs.readFileSync(file).toString('base64'),
+          mimeType: 'image/png',
+          badBbox: bbox,
+          why,
+        },
+        { onLog, models: key.chain, label: `khoanh lại ${job.id}` },
+      );
+      const retryWhy = fixed ? await gateOf(file, fixed, W, Hh) : 'không khoanh lại được';
+      if (fixed && !retryWhy) {
+        bbox = fixed;
+        why = null;
+        refined++;
+        console.log(`   hình ${job.id}: khoanh lại đạt [${fixed.join(', ')}]`);
+      } else {
+        dropped++;
+        console.log(RED(`   hình ${job.id}: bỏ — ${why}`));
+        continue;
+      }
+    }
+    const entry = await cut(file, bbox, W, Hh);
+    if (entry) figures.set(job.id, entry);
   } catch (err) {
     console.log(DIM(`   cắt hình ${job.id} hỏng: ${err.message}`));
   }
 }
 if (figureJobs.length) {
-  const miss = figureJobs.length - figures.size;
+  const miss = figureJobs.length - figures.size - dropped;
   console.log(
-    `Cắt hình: ${figures.size}/${figureJobs.length}${miss ? RED(` (${miss} hỏng)`) : ''}`,
+    `Cắt hình: ${figures.size}/${figureJobs.length}` +
+      (refined ? `, ${refined} khoanh lại` : '') +
+      (dropped ? RED(`, ${dropped} bỏ vì cắt vào chữ đề`) : '') +
+      (miss ? RED(` (${miss} hỏng)`) : ''),
   );
 }
 

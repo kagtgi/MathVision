@@ -85,6 +85,11 @@ const contexts = buildFigureContexts(pageMmds);
 
 fs.rmSync(PUB_DIR, { recursive: true, force: true });
 fs.mkdirSync(PUB_DIR, { recursive: true });
+// Dọn KỂ CẢ khi script chết giữa chừng: `public/` được Vite copy nguyên vào `dist/`, nên hình đề
+// thi còn sót lại sẽ đi thẳng vào bản đóng gói.
+process.on('exit', () => {
+  if (!keep) fs.rmSync(PUB_DIR, { recursive: true, force: true });
+});
 
 const pageJobs = [];
 for (const job of jobs) {

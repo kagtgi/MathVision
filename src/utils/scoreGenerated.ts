@@ -162,13 +162,17 @@ export async function scoreGenerated(i: ScoreGeneratedInput): Promise<GenVerdict
       lyDo?: string;
     };
 
-    const a1 = (p.nhanAnh1 ?? []).map(normLabel).filter(Boolean);
-    const a2 = (p.nhanAnh2 ?? []).map((s) => s.trim());
+    // Lọc rỗng ở CẢ HAI mảng. Lọc một bên thôi thì model trả kèm một chuỗi rỗng là lệch số lượng
+    // -> `labelsMatch` false -> loại oan một ảnh có thể đúng.
+    const a1 = (p.nhanAnh1 ?? []).map((s) => s.trim()).filter(Boolean);
+    const a2 = (p.nhanAnh2 ?? []).map((s) => s.trim()).filter(Boolean);
     const loi = p.loi ?? [];
     const doTinCay = typeof p.doTinCay === 'number' ? p.doTinCay : 0;
 
     // Phép so nhãn TẤT ĐỊNH: cùng số lượng, không có nhãn nhoè, và cùng tập hợp.
-    const set1 = new Set(a1);
+    // Chuẩn hoá CẢ HAI bên (bỏ `$`, khoảng trắng, hạ chữ thường) — chuẩn một bên thì `$A$` và
+    // `A` thành hai nhãn khác nhau và không ảnh nào khớp được.
+    const set1 = new Set(a1.map(normLabel).filter(Boolean));
     const set2 = new Set(a2.map(normLabel).filter(Boolean));
     const labelsMatch =
       a1.length === a2.length &&

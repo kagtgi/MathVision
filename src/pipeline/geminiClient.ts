@@ -496,6 +496,9 @@ export interface KeyCheckResult {
  * vẫn sống và key chưa bị chối, nên cho vào và chỉ cảnh báo.
  */
 export async function checkApiKey(apiKey: string): Promise<KeyCheckResult> {
+  // Đổi key thì cờ "tài khoản này không có model ảnh" của key CŨ hết giá trị. Không xoá thì người
+  // dùng đổi sang key CÓ model ảnh mà tính năng vẫn tắt cho tới khi khởi động lại app.
+  imageChainDead = false;
   try {
     const ai = clientFor(apiKey);
     const available: string[] = [];

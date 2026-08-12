@@ -24,11 +24,9 @@ import WordOptions, { DEFAULT_WORD_OPTIONS, type WordOptionsValue } from './comp
 import {
   cropFigure,
   warnFor,
-  KIND_NOT_ALLOWED,
   type FigureEntry,
   type FigureMap,
   type FigureOutcome,
-  type FigureSource,
 } from './pipeline/figures';
 import { buildFigureContexts, type FigureContext } from './pipeline/figureContext';
 import { upgradeFigure } from './pipeline/upgradeFigure';
@@ -39,11 +37,7 @@ import { crossCheckPage } from './pipeline/textLayerCheck';
 import { recheck, runTextPipeline } from './pipeline/runPipeline';
 import type { QcIssue } from './pipeline/qc';
 import { tikzToImage } from './utils/latexToImage';
-import { generateTikzMultiAgent } from './utils/tikzMultiAgent';
-import { isGenImageAllowed, isRedrawable } from './utils/figurePrompts';
-import { scoreRedraw } from './utils/scoreRedraw';
-import { scoreGenerated } from './utils/scoreGenerated';
-import { genFigureImage } from './utils/genFigureImage';
+import { isRedrawable } from './utils/figurePrompts';
 import * as historyStore from './history/store';
 import type { RestoredConversion } from './history/store';
 import { canvasThumbJpeg } from './history/thumb';

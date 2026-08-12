@@ -141,7 +141,10 @@ const aspect = (box: { w: number; h: number }) => box.w / box.h;
  */
 export function preGateGen(crop: RasterStats, gen: RasterStats): string | null {
   if (!gen.inkBox) return 'ảnh sinh ra trắng hoàn toàn';
-  if (Math.min(gen.w, gen.h) < 128) return `ảnh sinh ra quá nhỏ (${gen.w}x${gen.h})`;
+  // Đo CẠNH DÀI, không đo cạnh ngắn. `normalizeToPng` đã cắt sát nét rồi kẹp cạnh dài về 1000px,
+  // nên một hình NGANG hợp lệ (tỉ lệ 8:1) ra 1000x125 — lấy `min < 128` là loại oan đúng những
+  // hình dẹt, mà `model` (mái nhà, cầu, dầm) rất hay dẹt. Ảnh stub thật thì cạnh dài cũng nhỏ.
+  if (Math.max(gen.w, gen.h) < 200) return `ảnh sinh ra quá nhỏ (${gen.w}x${gen.h})`;
   if (Math.max(gen.w, gen.h) > 4096) return `ảnh sinh ra quá lớn (${gen.w}x${gen.h})`;
   if (gen.ink < 0.004) {
     return `gần như trắng (${(gen.ink * 100).toFixed(2)}% mực, ngưỡng app ${MIN_INK_RATIO})`;
@@ -253,6 +256,7 @@ export async function normalizeToPng(
     const bw = Math.min(src.width - bx, stats.inkBox.w + pad * 2);
     const bh = Math.min(src.height - by, stats.inkBox.h + pad * 2);
 
+    // Cạnh dài kẹp về maxPx; cửa G1 của `preGateGen` đo cạnh DÀI nên hình dẹt không bị loại oan.
     const size = fitWithin(bw, bh, maxPx);
     const out = document.createElement('canvas');
     out.width = size.w;

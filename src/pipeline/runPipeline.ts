@@ -73,9 +73,9 @@ export async function runTextPipeline(input: PipelineInput): Promise<PipelineRes
     const failed = solved.filter((s) => s.failed).length;
     if (failed) notes.push(`${failed} câu chưa giải được — dùng nút "Giải lại câu này".`);
 
-    // Lời giải thiếu hình phải NÓI RA. Bản trước chỉ ghi nhật ký rồi im, nên câu hình học
-    // không có hình trông y như câu không cần hình.
-    notes.push(...figureMisses);
+    // Lời giải thiếu hình đi vào QC (bên dưới) chứ KHÔNG vào `notes`: workbench hiện cả hai
+    // danh sách cạnh nhau, đẩy vào cả hai là người dùng đọc mỗi câu hai lần. QC là chỗ đúng —
+    // nó có mức độ nghiêm trọng và là nơi người ta đi soát.
 
     // Lời giải cũng do model viết ra nên phải qua đúng lớp sửa như văn bản OCR: model
     // rất hay dùng `\begin{cases}` cho hệ phương trình và `$$` cho công thức tách dòng,

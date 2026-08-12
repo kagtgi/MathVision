@@ -1,8 +1,18 @@
 /**
  * Năng lực THẬT của renderer TikZJax — ĐO, không đoán.
  *
- * Đo ngày 2026-08-11 bằng `/probe-tikz.html` (`src/devtools/tikzProbe/`), 38 ca, mỗi ca một
- * câu hỏi. Chạy lại một nhóm: `/probe-tikz.html?only=chu-viet`.
+ * HAI LƯỢT ĐO, hai câu hỏi khác nhau — đọc cả hai mới đủ:
+ *
+ * 1. **Năng lực renderer** — `/probe-tikz.html` (`src/devtools/tikzProbe/`), 36 ca, mỗi ca một
+ *    câu hỏi về CÚ PHÁP. Chạy lại một nhóm: `/probe-tikz.html?only=chu-viet`.
+ * 2. **Hình đề thi có tới được Word không** — `/tikz-corpus.html` (`src/devtools/tikzCorpus/`),
+ *    47 hình thật của chương trình THPT chia bốn họ, đi qua đúng `tikzToImage()` của app.
+ *    Chấm bằng máy: `node scripts/verify-tikz-render.mjs`. Kết quả lượt đầu: **47/47 dựng
+ *    được**, và những gì nó chứng minh nằm ở `TIKZ_CONFIRMED_WORKING` bên dưới.
+ *
+ * Lượt 2 cần thiết vì lượt 1 trả lời "\foreach có chạy không", không trả lời "một bảng biến
+ * thiên có tiệm cận đứng có dựng ra được không". Renderer TẤT ĐỊNH (hai lượt liên tiếp cho số
+ * đo trùng khít từng byte) nên dải mực của từng hình siết được tới +-10%.
  *
  * VÌ SAO FILE NÀY TỒN TẠI: bản 1.0 cấm `\foreach`, `\draw plot`, `\pgfmathsetmacro`,
  * `\tikzset` trong prompt bằng NIỀM TIN. Đo lại thì **cả bốn đều chạy tốt**. Ngược lại, thứ
@@ -16,6 +26,19 @@
  */
 
 export const TIKZ_CAPS_MEASURED_AT = '2026-08-11';
+
+/**
+ * Dưới ngưỡng mực này thì `tikzToImage` coi như KHÔNG dựng được và bỏ hình.
+ *
+ * Vì sao cần: ra được `<svg>` không có nghĩa là ra được hình. Một `tikzpicture` rỗng vẫn sinh
+ * SVG hợp lệ, rồi `MIN_TIKZ_DIMENSION` biến nó thành PNG trắng 100×100 — và bản trắng đó đi
+ * thẳng vào file Word. Đo mực là phép kiểm duy nhất bắt được.
+ *
+ * Đối chiếu 47 hình đề thi thật (bộ corpus): mực đo được **0,0135 – 0,176**, tức hình thưa
+ * nhất vẫn cách ngưỡng này gần 7 lần. Ngưỡng nằm ở đây thay vì trong `latexToImage.ts` vì nó
+ * là một SỐ ĐO, và vì bộ đo chạy dưới Node cũng phải chấm bằng đúng ngưỡng này.
+ */
+export const MIN_INK_RATIO = 0.002;
 
 /**
  * Thư viện TikZ dùng được. Đây là allowlist của sanitizer: tên ngoài danh sách này bị bỏ
@@ -95,7 +118,8 @@ export const TIKZ_PACKAGES_PRELOADED = [
 
 /**
  * Cú pháp đã dựng thử THÀNH CÔNG. Prompt được phép yêu cầu những thứ này.
- * `case` là id ca trong `src/devtools/tikzProbe/cases.ts` để tra lại.
+ * `case` là id ca để tra lại — trong `tikzProbe/cases.ts` (cú pháp) hoặc `tikzCorpus/cases.ts`
+ * (hình đề thi thật, id có tiền tố `dothi-`/`bbt-`/`phang-`/`kg-`).
  */
 export const TIKZ_CONFIRMED_WORKING = [
   { what: '\\foreach \\x in {1,...,5}', case: 'foreach-range' },
@@ -113,6 +137,53 @@ export const TIKZ_CONFIRMED_WORKING = [
   { what: '\\def\\a{210}', case: 'polar-macro' },
   { what: 'bảng biến thiên kẻ tay bằng \\draw + \\node + mũi tên', case: 'bbt-handmade' },
   { what: 'dấu tiếng Việt kiểu LaTeX: \\`o, \\\'{\\^o}, \\~{a}, \\d{o}', case: 'vn-accent-*' },
+
+  // ── Đo lượt 2 (bộ hình đề thi, 47/47 dựng được) ────────────────────────────
+  {
+    what: 'tô miền bằng \\fill[pattern=north east lines] nối HAI lệnh plot rồi -- cycle',
+    case: 'dothi-mien-giua-hai-do-thi, dothi-mien-voi-truc-ox',
+    note:
+      'Mở đường cho cả dạng bài diện tích hình phẳng và thể tích khối tròn xoay của lớp 12. ' +
+      'Đây là ca vào bộ đo với nhãn "rủi ro có chủ ý" vì nối hai plot trong một path.',
+  },
+  {
+    what: 'hai nhánh RỜI của hàm phân thức: hai lệnh plot với domain tách qua tiệm cận đứng',
+    case: 'dothi-phan-thuc-hai-nhanh, dothi-tiem-can-xien',
+  },
+  { what: 'hàm mũ {2^\\x} và logarit {ln(\\x)/ln(2)} trong plot', case: 'dothi-mu-va-loga' },
+  {
+    what: 'name path= + \\path[name intersections={of=a and b,by=H}] để lấy giao điểm',
+    case: 'phang-truc-tam',
+  },
+  {
+    what: 'phép chiếu vuông góc của calc ($(B)!(A)!(C)$) — chân đường cao ĐÚNG',
+    case: 'phang-truc-tam, phang-tam-giac-vuong-duong-cao',
+  },
+  { what: '\\node[draw,circle through=(A)] at (O) {}', case: 'phang-duong-tron-ngoai-tiep' },
+  {
+    what: '\\pic{angle=B--A--C} kèm nhãn kiểu quotes ["$\\alpha$"], và \\pic{right angle=...}',
+    case: 'phang-goc-noi-tiep, kg-goc-duong-thang-va-mat-phang',
+  },
+  {
+    what: 'postaction={decorate,decoration={markings,mark=at position .5 with {...}}}',
+    case: 'phang-hinh-thang-dau-bang-nhau',
+    note: 'Dấu đoạn bằng nhau. Không cần decorations.pathreplacing (thứ KHÔNG có).',
+  },
+  {
+    what: 'ellipse (a and b) và arc (180:360:a and b) — hình trụ, nón, cầu',
+    case: 'kg-hinh-tru, kg-hinh-non, kg-mat-cau',
+  },
+  {
+    what: 'bảng biến thiên đủ dạng: gạch dọc $\\|$ tại tiệm cận, ô f(x) chia đôi ghi hai giới hạn',
+    case: 'bbt-tiem-can-dung, bbt-phan-thuc-bac-nhat',
+  },
+  {
+    what: 'MỘT \\node cho ra ĐÚNG MỘT node <text> trong SVG (không phải một <text> mỗi glyph)',
+    case: 'toàn bộ 47 hình corpus',
+    note:
+      'Số đo về nhãn, không phải cú pháp. Nhờ nó mà đếm <text> dùng được làm phép kiểm "nhãn ' +
+      'có ra hay không" — thứ duy nhất bắt được lớp lỗi font 404 của 1.2.',
+  },
 ] as const;
 
 /**

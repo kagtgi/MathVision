@@ -18,7 +18,10 @@ import {
 } from 'lucide-react';
 
 import MmdWorkbench from './components/MmdWorkbench';
-import OptionToggles, { type PipelineToggles } from './components/OptionToggles';
+import OptionToggles, {
+  DEFAULT_TOGGLES,
+  type PipelineToggles,
+} from './components/OptionToggles';
 import WordOptions, { DEFAULT_WORD_OPTIONS, type WordOptionsValue } from './components/WordOptions';
 import { cropFigure, type FigureMap } from './pipeline/figures';
 import { ocrPage } from './pipeline/ocr';
@@ -61,12 +64,11 @@ export default function ImageToWordConverter({ apiKey, models, restore, restoreS
   const [wordOptions, setWordOptions] = useState<WordOptionsValue>(DEFAULT_WORD_OPTIONS);
   const format = wordOptions.format;
 
+  // Chế độ ảnh đơn không có bước vẽ lại hình trong đề (xem `HIDDEN_IN_IMAGE_MODE`).
   const [toggles, setToggles] = useState<PipelineToggles>({
-    examMode: true,
-    autoSolve: true,
-    doubleCheck: true,
-    drawFigures: true,
+    ...DEFAULT_TOGGLES,
     redrawTikz: false,
+    genFigureImage: false,
   });
 
   const fullResRef = useRef<HTMLCanvasElement | null>(null);
@@ -258,8 +260,10 @@ export default function ImageToWordConverter({ apiKey, models, restore, restoreS
           drawFigures: toggles.drawFigures,
           verifyFigures: toggles.drawFigures,
           figureImages: figureImagesOf(map),
+          // Xem chú thích cùng chỗ ở `PdfToDocxConverter`: thiếu `onNote` là mất sạch lý do khi
+          // hình lời giải hỏng.
           renderTikz: async (code) => {
-            const png = await tikzToImage(code);
+            const png = await tikzToImage(code, (n) => addLog(`TikZ lời giải: ${n}`));
             return png ? { bytes: png.bytes, w: png.width, h: png.height } : null;
           },
           onProgress: (done, total) => {

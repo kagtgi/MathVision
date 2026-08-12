@@ -11,3 +11,7 @@ demo/
 *.log
 .env*
 !.env.example
+
+# Ảnh cắt tạm của scripts/probe-figure-pipeline.mjs. Vite copy cả public/ vào dist/ nên một
+# lượt chạy hỏng (hoặc --keep) sẽ nhét hình đề thi vào bản đóng gói.
+public/probe-figs/

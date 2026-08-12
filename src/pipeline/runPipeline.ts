@@ -53,6 +53,7 @@ export async function runTextPipeline(input: PipelineInput): Promise<PipelineRes
 
   let solved: SolvedQuestion[] = [];
   let disagreements: string[] = [];
+  let figureMisses: string[] = [];
   const newFigures = new Map<string, { bytes: Uint8Array; w: number; h: number }>();
 
   const alreadyHasSolutions = HAS_SOLUTIONS.test(mmd) || mmd.includes('# ĐÁP ÁN CHI TIẾT');
@@ -66,10 +67,15 @@ export async function runTextPipeline(input: PipelineInput): Promise<PipelineRes
     const result = await solveExam(mmd, input.solveOptions);
     solved = result.solved;
     disagreements = result.disagreements;
+    figureMisses = result.figureMisses;
     for (const [k, v] of result.newFigures) newFigures.set(k, v);
 
     const failed = solved.filter((s) => s.failed).length;
     if (failed) notes.push(`${failed} câu chưa giải được — dùng nút "Giải lại câu này".`);
+
+    // Lời giải thiếu hình đi vào QC (bên dưới) chứ KHÔNG vào `notes`: workbench hiện cả hai
+    // danh sách cạnh nhau, đẩy vào cả hai là người dùng đọc mỗi câu hai lần. QC là chỗ đúng —
+    // nó có mức độ nghiêm trọng và là nơi người ta đi soát.
 
     // Lời giải cũng do model viết ra nên phải qua đúng lớp sửa như văn bản OCR: model
     // rất hay dùng `\begin{cases}` cho hệ phương trình và `$$` cho công thức tách dòng,
@@ -104,7 +110,7 @@ export async function runTextPipeline(input: PipelineInput): Promise<PipelineRes
   const figureIds = new Set(input.figureIds);
   for (const id of newFigures.keys()) figureIds.add(id);
 
-  const issues = qcMmd(mmd, { figureIds, disagreements });
+  const issues = qcMmd(mmd, { figureIds, disagreements, figureMisses });
   return { mmd, issues, notes, solved, disagreements, newFigures };
 }
 

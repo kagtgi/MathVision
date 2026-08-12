@@ -27,7 +27,7 @@ npm run lint
 npm run verify
 ```
 
-`npm run verify` là bộ kiểm thật của dự án (không có Jest/Vitest). Mười hai harness:
+`npm run verify` là bộ kiểm thật của dự án (không có Jest/Vitest). Mười lăm harness:
 
 | Harness | Kiểm gì |
 |---|---|
@@ -38,6 +38,9 @@ npm run verify
 | `verify-vdc.mjs` | docx + .txt định dạng VDC khớp spec, và định dạng thường không bị đổi |
 | `verify-textlayer.mjs` | phép đối chiếu lớp văn bản PDF bắt được lỗi thật, không báo oan |
 | `verify-tikz-sanitize.mjs` | bộ lọc mã TikZ chặn bốn thứ đã ĐO là làm chết hình |
+| `verify-tikz-corpus.mjs` | bộ 47 hình đề thi là mã sạch, và luật vẽ không khuyên thứ bộ hình chưa chứng minh |
+| `verify-figure-policy.mjs` | câu nào thì lời giải bắt buộc có hình — mỗi luật kèm một ca ÂM chống khớp quá rộng |
+| `verify-figure-gen.mjs` | khung tỉ lệ ảnh, mười cửa đo pixel, ngữ cảnh đề, và câu chữ cảnh báo |
 | `verify-history.mjs` | lưu → mở lại → xuất Word ra `document.xml` trùng từng ký tự |
 | `verify-download.mjs` | luồng lưu file của bản đóng gói — **cần một bản `.exe` đã build** |
 | `verify-update.mjs` | `electron-updater` có trong asar, có `app-update.yml` + `latest.yml` — **cần build** |
@@ -55,9 +58,31 @@ chạy bản CI:
 npm run verify:ci
 ```
 
-`verify:ci` gồm bốn harness tự chứa fixture — cũng chính là bộ mà GitHub
+`verify:ci` gồm chín harness tự chứa fixture — cũng chính là bộ mà GitHub
 Actions chạy trên mỗi PR. Nếu bạn sửa gì trong `src/pipeline/`, hãy nói rõ
 trong PR là đã chạy được `npm run verify` đầy đủ hay chưa.
+
+## Dựng thật hình TikZ (chạy tay)
+
+```bash
+node scripts/verify-tikz-render.mjs            # cả 47 hình, ~90 giây
+node scripts/verify-tikz-render.mjs --only=bbt # một họ
+node scripts/verify-tikz-render.mjs --keep     # giữ Vite sống để mở trang xem
+```
+
+Bật Vite + Electron rồi dựng thật 47 hình đề thi THPT qua chính `tikzToImage()`, chấm bằng
+mực / số nhãn / font / cỡ khi vào Word. **Không** nằm trong `verify:ci`: mỗi lượt dựng cấp
+163,8 MB `WebAssembly.Memory` nên phải chạy tuần tự, và `verify:ci` là chuỗi `&&` không có
+`timeout-minutes`. Chạy nó trước khi mở PR nếu bạn sửa `figurePrompts.ts`, `tikzSanitize.ts`,
+`latexToImage.ts`, hoặc bộ hình.
+
+Sửa một hình thì **phải đo lại dải mực**: chạy harness rồi lấy số ở
+`demo/tikz-corpus/results.json` cập nhật vào `expectInk`/`minText`. Renderer tất định nên dải
+siết tới ±10%, đủ chặt để bắt lại lớp lỗi font 404 của 1.2 (chỉ lệch ~11% mực).
+
+Soát hình **bằng mắt** là việc riêng và không harness nào thay được: `npm run dev` rồi mở
+`/tikz-corpus.html` — 47 hình kèm mục chương trình. Harness chứng minh hình *dựng được*, chỉ
+mắt người chứng minh hình *đúng kiểu SGK*.
 
 ## Nếu bạn sửa file trong `electron/`
 

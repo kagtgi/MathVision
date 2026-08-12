@@ -22,8 +22,15 @@ export type MmdBlock =
   /** Dòng nằm trong khối `$$` — nhả nguyên văn, không diễn giải. */
   | { kind: 'raw'; line: string }
   | { kind: 'table'; rows: string[][]; headerBold: boolean }
-  /** `line` để dựng lại thành text khi không tìm được ảnh — bản gốc rơi về dòng thường. */
-  | { kind: 'image'; ref: string; line: string }
+  /**
+   * `line` để dựng lại thành text khi không tìm được ảnh — bản gốc rơi về dòng thường.
+   *
+   * `inSolution` để renderer thụt hình vào đúng cột lời giải. Bản trước KHÔNG mang cờ này dù
+   * bộ quét vẫn theo dõi trạng thái, nên đoạn ảnh luôn canh giữa theo cột ĐẦY ĐỦ trong khi
+   * chữ lời giải thụt 992 twip — hình lệch 0,87 cm so với khối chữ nó minh hoạ, và renderer
+   * không có cách nào biết để sửa.
+   */
+  | { kind: 'image'; ref: string; line: string; inSolution: boolean }
   | { kind: 'heading'; level: number; text: string; isPhan: boolean; isDapAn: boolean }
   | { kind: 'phan'; text: string; afterSolution: boolean }
   | { kind: 'loiGiai' }
@@ -122,7 +129,7 @@ export function parseMmdBlocks(mmd: string): MmdBlock[] {
 
     const img = line.match(/^\s*!\[[^\]]*\]\(([^)]+)\)\s*$/);
     if (img && !/^https?:/i.test(img[1])) {
-      out.push({ kind: 'image', ref: img[1], line });
+      out.push({ kind: 'image', ref: img[1], line, inSolution });
       i++;
       continue;
     }

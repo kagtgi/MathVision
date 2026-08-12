@@ -51,6 +51,24 @@ export const isRedrawable = (k: FigureCategory): boolean =>
   (REDRAWABLE as readonly string[]).includes(k);
 
 /**
+ * Loại nào cho AI SINH ẢNH khi TikZ thua. Allowlist RIÊNG, KHÔNG dùng `REDRAWABLE`.
+ *
+ * Thầy chốt 2026-08-11: hình toán chính xác phải là TikZ, AI chỉ dựng hình của các câu thực tế.
+ *   - `bbt`, `dothi`: sai một dấu +/- hay một số trục là sai hỏng bài, mà trọng tài đối chiếu với
+ *     ảnh cắt mờ cũng không bắt được.
+ *   - `khonggian`, `phang`: lệch một điểm trên cạnh, mất một nét đứt cũng là sai toán.
+ *   - `ve`: là giá trị MẶC ĐỊNH khi OCR thiếu thuộc tính `kind`, nên một đồ thị khai thiếu sẽ rơi
+ *     vào đó — cho sinh là mở đúng cửa mà quyết định trên vừa đóng.
+ *   - `anh`, `bang`: đã bị `isRedrawable` chặn từ trước.
+ *
+ * Nới ra thì sửa ĐÚNG hằng số này.
+ */
+export const GEN_IMAGE_KINDS: readonly FigureCategory[] = ['model'];
+
+export const isGenImageAllowed = (k: FigureCategory): boolean =>
+  (GEN_IMAGE_KINDS as readonly string[]).includes(k);
+
+/**
  * Phong cách chung, áp cho mọi loại. Dịch từ yêu cầu của người dùng: nét mảnh đều, đen
  * trắng, phẳng, không hiệu ứng, giống hình in trong SGK chứ không giống infographic.
  */
@@ -68,9 +86,18 @@ Nét và màu:
 - Mở đầu bằng: \\begin{tikzpicture}[line cap=round, line join=round, >=Stealth]
 - Cạnh THẤY vẽ nét liền; cạnh BỊ CHE vẽ nét đứt (dashed).
 
-Nhãn:
-- Nhãn đặt NGOÀI hình, không đè lên nét, không đè lên nhau. Dùng above/below/left/right/
-  above left... theo vị trí thực tế của điểm.
+Nhãn — KHÔNG ĐƯỢC ĐỂ NÉT CHẠY XUYÊN QUA CHỮ:
+- Trước khi đặt mỗi nhãn, hỏi: quanh điểm này có những nét nào đi ra? Chọn hướng KHÔNG có nét.
+- Luôn ghi kèm khoảng cách: above=2pt, below right=1pt, right=3pt. Viết trống (above right)
+  là dán chữ sát điểm, rất dễ chạm nét.
+- Điểm có NHIỀU nét đi ra (gốc toạ độ, giao điểm, trọng tâm, chân đường cao, tâm đường tròn)
+  thì bốn hướng chéo thường bị chiếm hết. Khi đó dùng hướng THẲNG: right=3pt hoặc below=2pt.
+- Gốc $O$: đặt về phía KHÔNG có đồ thị. Đồ thị đi qua gốc theo hướng nào thì tránh hướng đó.
+- Mốc trên trục: đặt về phía đường cong KHÔNG đi qua. Và đừng vẽ đường cong dài quá nghiệm
+  cần thể hiện — kéo dài quá là nó cắt ngang chính nhãn mốc đó.
+- Mũi tên (bảng biến thiên, vectơ) phải DỪNG TRƯỚC nhãn, chừa khoảng hở. Mũi tên kết thúc
+  đúng chỗ đặt nhãn thì đầu mũi tên đâm vào chữ.
+- Nhãn số đo góc: dùng angle eccentricity=1.5 để đẩy chữ ra khỏi hai cạnh của góc.
 - Tên điểm và công thức đặt trong $...$: $A$, $B'$, $S.ABCD$.
 - KHÔNG ghi độ dài, số đo góc, hay toạ độ nếu đề không cho con số đó.
 - Chỉ đánh dấu góc vuông / đoạn bằng nhau / hai đường song song khi đề nói rõ hoặc khi

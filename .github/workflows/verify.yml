@@ -29,10 +29,14 @@ jobs:
       - name: Typecheck
         run: npm run lint
 
-      # Chỉ bốn harness tự chứa fixture. verify-pipeline/verify-docx cần 25 đề thi
+      # Chỉ chín harness tự chứa fixture. verify-pipeline/verify-docx cần 25 đề thi
       # thật (không đưa lên repo được) và verify-download cần một bản .exe đã build
       # cùng hộp thoại lưu file của Windows — hai thứ đó chạy tay trước khi mở PR,
       # xem CONTRIBUTING.md.
+      #
+      # verify-tikz-render cũng ngoài đây: nó bật Electron dựng thật 47 hình, mỗi lượt
+      # cấp 163,8 MB WebAssembly.Memory nên phải tuần tự, tổng ~90 giây — mà job này
+      # không có timeout-minutes. Cửa rẻ thay cho nó là verify-tikz-corpus (thuần).
       - name: Verify (harness tự chứa)
         run: npm run verify:ci
 

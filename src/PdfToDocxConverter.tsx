@@ -16,19 +16,29 @@ import { useDropzone, type FileRejection } from 'react-dropzone';
 import { AlertCircle, FileText, History as HistoryIcon, Loader2, Upload, X } from 'lucide-react';
 
 import MmdWorkbench from './components/MmdWorkbench';
-import OptionToggles, { type PipelineToggles } from './components/OptionToggles';
+import OptionToggles, {
+  DEFAULT_TOGGLES,
+  type PipelineToggles,
+} from './components/OptionToggles';
 import WordOptions, { DEFAULT_WORD_OPTIONS, type WordOptionsValue } from './components/WordOptions';
-import { cropFigure, type FigureMap } from './pipeline/figures';
+import {
+  cropFigure,
+  warnFor,
+  type FigureEntry,
+  type FigureMap,
+  type FigureOutcome,
+} from './pipeline/figures';
+import { buildFigureContexts, type FigureContext } from './pipeline/figureContext';
+import { upgradeFigure } from './pipeline/upgradeFigure';
 import { ocrPage } from './pipeline/ocr';
 import type { FigureKind } from './pipeline/prompts';
 import { canvasToJpegBase64, extractPageText, loadPdf, renderPdfPage } from './pipeline/pdfRender';
 import { crossCheckPage } from './pipeline/textLayerCheck';
 import { recheck, runTextPipeline } from './pipeline/runPipeline';
+import { runAdaptivePool } from './pipeline/geminiClient';
 import type { QcIssue } from './pipeline/qc';
 import { tikzToImage } from './utils/latexToImage';
-import { generateTikzMultiAgent } from './utils/tikzMultiAgent';
 import { isRedrawable } from './utils/figurePrompts';
-import { scoreRedraw } from './utils/scoreRedraw';
 import * as historyStore from './history/store';
 import type { RestoredConversion } from './history/store';
 import { canvasThumbJpeg } from './history/thumb';
@@ -39,12 +49,23 @@ const RENDER_BATCH_SIZE = 4;
 interface Props {
   apiKey: string;
   models?: string[];
+  /**
+   * Chuỗi model SINH ẢNH, tách khỏi `models`. Gộp vào là gửi yêu cầu sinh ảnh tới model
+   * đọc-hiểu và nhận về text — xem `IMAGE_MODEL_CHAIN`.
+   */
+  imageModels?: string[];
   /** Mục lịch sử vừa được mở lại; `restoreSeq` tăng mỗi lần mở để effect chạy lại. */
   restore?: RestoredConversion | null;
   restoreSeq?: number;
 }
 
-export default function PdfToDocxConverter({ apiKey, models, restore, restoreSeq }: Props) {
+export default function PdfToDocxConverter({
+  apiKey,
+  models,
+  imageModels,
+  restore,
+  restoreSeq,
+}: Props) {
   const [pdfFile, setPdfFile] = useState<File | null>(null);
   /**
    * Tên nguồn để đặt tên file .docx.
@@ -68,13 +89,7 @@ export default function PdfToDocxConverter({ apiKey, models, restore, restoreSeq
   const [wordOptions, setWordOptions] = useState<WordOptionsValue>(DEFAULT_WORD_OPTIONS);
   const format = wordOptions.format;
 
-  const [toggles, setToggles] = useState<PipelineToggles>({
-    examMode: true,
-    autoSolve: true,
-    doubleCheck: true,
-    drawFigures: true,
-    redrawTikz: true,
-  });
+  const [toggles, setToggles] = useState<PipelineToggles>(DEFAULT_TOGGLES);
 
   const abortRef = useRef<AbortController | null>(null);
   /** Id mục lịch sử của lượt chạy hiện tại, để `update` khi người dùng sửa MMD. */
@@ -82,6 +97,12 @@ export default function PdfToDocxConverter({ apiKey, models, restore, restoreSeq
   const saveTimerRef = useRef<number | null>(null);
   const thumbRef = useRef<Uint8Array | undefined>(undefined);
   const figuresRef = useRef<FigureMap>(new Map());
+  /**
+   * Kết quả nâng chất từng hình. Ref là nguồn ghi (vòng lặp chạy trong closure), state là bản
+   * trao cho khung soát hình — cùng khuôn `figuresRef`/`figures` ở trên.
+   */
+  const outcomesRef = useRef<FigureOutcome[]>([]);
+  const [outcomes, setOutcomes] = useState<FigureOutcome[]>([]);
 
   useEffect(() => () => abortRef.current?.abort(), []);
 
@@ -148,6 +169,8 @@ export default function PdfToDocxConverter({ apiKey, models, restore, restoreSeq
     setDisagreements([]);
     setLog([]);
     figuresRef.current = new Map();
+    outcomesRef.current = [];
+    setOutcomes([]);
 
     try {
       setStage('Đang mở PDF…');
@@ -226,6 +249,11 @@ export default function PdfToDocxConverter({ apiKey, models, restore, restoreSeq
         }
       }
 
+      // Ngữ cảnh đề cho từng hình. Dựng NGAY ĐÂY: `pageMmds` đã đủ, và chặng văn bản (nơi
+      // `splitForSolving` chạy) thì khởi động SONG SONG với bước nâng chất hình nên không
+      // mượn được map câu↔hình của nó.
+      const figureContexts = buildFigureContexts(pageMmds);
+
       // ── Hình: cắt trước làm lưới an toàn, rồi ưu tiên dựng lại bằng TikZ ──
       //
       // Ảnh cắt từ PDF luôn dính hạt và hay lem chữ bên cạnh, nên hình VẼ (hình học, đồ
@@ -254,15 +282,49 @@ export default function PdfToDocxConverter({ apiKey, models, restore, restoreSeq
         // phòng khi chưa phân loại được.
         const drawable = figureJobs.filter((j) => isRedrawable(j.kind) && map.has(j.id));
         const skipped = figureJobs.length - drawable.length;
-        for (const [i, job] of drawable.entries()) {
-          if (controller.signal.aborted) return;
-          addLog(`TikZ: đang vẽ lại hình ${i + 1}/${drawable.length} (${job.id})`);
-          const ok = await redrawOne(job.id, map.get(job.id)!, controller, job.kind);
-          if (!ok) allWarnings.push(`Hình ${job.id}: dựng TikZ không đạt — dùng ảnh cắt từ đề.`);
+        // KHÔNG gọi `setStage` trong vòng này: nó chạy song song với solver đang set
+        // "Đang giải câu N/M…", hai bên tranh nhau một ô chữ thì người dùng thấy nhấp nháy.
+        // CHẠY SONG SONG, không tuần tự. Đo trên đề THPT 2025: 5 hình mất 493 giây nối đuôi
+        // nhau, mà mỗi hình chỉ 61-132 giây — gần như toàn bộ thời gian là NGỒI CHỜ Gemini.
+        // `tikzToImage` tự cô lập từng lần dựng trong iframe riêng nên chạy song song được
+        // (xem chú thích ở `latexToImage.ts`), còn `runAdaptivePool` lo phần tụt xuống một luồng
+        // khi chạm hạn mức. Giữ mức 2: bước nâng chất ĐANG chạy cùng lúc với solver, đẩy cao hơn
+        // là hai bên tranh hạn mức của nhau rồi cả hai cùng bị 429.
+        let figDone = 0;
+        const outcomes = await runAdaptivePool(
+          drawable,
+          async (job) => {
+            const outcome = await upgradeOne({
+              id: job.id,
+              crop: map.get(job.id)!,
+              kind: job.kind,
+              context: figureContexts.get(job.id),
+              controller,
+            });
+            figDone++;
+            addLog(`Hình ${figDone}/${drawable.length} (${job.id}, ${job.kind}): ${outcome.used}`);
+            return outcome;
+          },
+          { concurrency: 2, signal: controller.signal, onLog: addLog },
+        );
+        if (controller.signal.aborted) return;
+        for (const outcome of outcomes) {
+          // `runAdaptivePool` nuốt lỗi thành `null`; hình đó vẫn còn ảnh cắt trong map nên tài
+          // liệu không thiếu hình, chỉ là không có kết quả để ghi cảnh báo.
+          if (!outcome) continue;
+          outcomesRef.current.push(outcome);
+          allWarnings.push(...warnFor(outcome));
         }
         if (skipped) {
           allWarnings.push(`${skipped} hình là ảnh chụp vật thật — giữ nguyên ảnh gốc.`);
         }
+        const genCount = outcomesRef.current.filter((o) => o.used === 'genai').length;
+        const tikzCount = outcomesRef.current.filter((o) => o.used === 'tikz').length;
+        const cropCount = figureJobs.length - genCount - tikzCount;
+        allWarnings.push(
+          `Tổng kết hình: ${tikzCount} vẽ lại bằng TikZ, ${genCount} do AI sinh, ${cropCount} giữ ảnh cắt.`,
+        );
+        setOutcomes([...outcomesRef.current]);
         setFigures(new Map(figuresRef.current));
       })();
 
@@ -282,9 +344,16 @@ export default function PdfToDocxConverter({ apiKey, models, restore, restoreSeq
           doubleCheck: toggles.doubleCheck,
           drawFigures: toggles.drawFigures,
           verifyFigures: toggles.drawFigures,
+          // CHỤP MAP ẢNH CẮT, cố ý: `map` ở đây là bản ảnh cắt trước khi `tikzWork` ghi đè. Ảnh
+          // cắt là bản CHUẨN để solver đọc đề — đưa nó bản TikZ hay bản AI sinh là để nó giải bài
+          // dựa trên một hình đã qua tay model khác. Đừng "sửa" thành `figuresRef.current`.
           figureImages: buildFigureImages(map),
+          // Truyền `onNote`: không có nó thì mọi ghi chú của bộ lọc ("bỏ dấu tiếng Việt",
+          // "bỏ thư viện không có") và mức mực đo được đều bị vứt cho hình solver — trong khi
+          // đường ảnh cắt vẫn ghi chúng vào nhật ký. Đó là lý do hình lời giải hỏng thì không ai
+          // biết vì sao.
           renderTikz: async (code) => {
-            const png = await tikzToImage(code);
+            const png = await tikzToImage(code, (n) => addLog(`TikZ lời giải: ${n}`));
             return png ? { bytes: png.bytes, w: png.width, h: png.height } : null;
           },
           onProgress: (done, totalQ) => {
@@ -337,56 +406,36 @@ export default function PdfToDocxConverter({ apiKey, models, restore, restoreSeq
   };
 
   /**
-   * Dựng lại MỘT hình bằng TikZ, và CHỈ thay vào chỗ ảnh cắt khi bản vẽ lại thật sự tốt hơn.
+   * Nâng chất MỘT hình. Luật điều phối nằm ở `pipeline/upgradeFigure.ts` — ở đây chỉ nối dây:
+   * khoá, chuỗi model, công tắc, nhật ký, và chỗ ghi kết quả vào figureMap.
    *
-   * Bản trước thay ngay khi mã compile được, mà bước soát thì chỉ đọc ảnh gốc cùng hai chuỗi
-   * mã — KHÔNG BAO GIỜ nhìn ảnh mình vừa dựng. Nên nó có thể lặng lẽ thay một ảnh cắt đọc
-   * được bằng một hình sai-mà-vẫn-dựng-được. Giờ đưa ẢNH CẮT GỐC và ẢNH VỪA DỰNG cạnh nhau
-   * cho model chấm, thua thì giữ ảnh cắt.
-   *
-   * Trả `false` khi giữ ảnh cắt — lúc đó ảnh cắt vẫn nguyên trong figureMap nên tài liệu
-   * không bao giờ thiếu hình. Hỏng một hình không được làm hỏng cả tài liệu, nên mọi lỗi
-   * đều nuốt tại đây.
+   * Tách ra module vì nằm trong file UI thì KHÔNG ĐO ĐƯỢC: chạy đề thật bằng dòng lệnh không
+   * gọi tới đây, nên không biết TikZ thua vì mã sai, vì trọng tài loại, hay vì đường đó không
+   * hề chạy. Giờ `scripts/probe-figure-pipeline.mjs` gọi đúng hàm đó trên hình đề thật.
    */
-  const redrawOne = async (
-    id: string,
-    fig: { bytes: Uint8Array },
-    controller: AbortController,
-    kind: FigureKind,
-  ): Promise<boolean> => {
-    try {
-      const gen = await generateTikzMultiAgent(apiKey, bytesToBase64(fig.bytes), 'image/png', {
-        kind,
-      });
-      if (controller.signal.aborted) return false;
-      if (!gen.tikzCode.includes('\\begin{tikzpicture}')) return false;
-      const png = await tikzToImage(gen.tikzCode, (n) => addLog(`TikZ ${id}: ${n}`));
-      if (!png) return false;
-      if (controller.signal.aborted) return false;
-
-      const verdict = await scoreRedraw(
-        apiKey,
-        bytesToBase64(fig.bytes),
-        bytesToBase64(png.bytes),
-        kind,
-      );
-      if (verdict.keep === 'crop') {
-        addLog(`TikZ ${id}: giữ ảnh cắt — ${verdict.why}`);
-        return false;
-      }
-
-      figuresRef.current.set(id, {
-        bytes: png.bytes,
-        w: png.width,
-        h: png.height,
-        source: 'tikz',
-      });
-      setFigures(new Map(figuresRef.current));
-      return true;
-    } catch {
-      return false;
-    }
-  };
+  const upgradeOne = (a: {
+    id: string;
+    crop: FigureEntry;
+    kind: FigureKind;
+    context: FigureContext | undefined;
+    controller: AbortController;
+  }): Promise<FigureOutcome> =>
+    upgradeFigure({
+      id: a.id,
+      crop: a.crop,
+      kind: a.kind,
+      context: a.context,
+      apiKey,
+      models,
+      imageModels,
+      allowGen: toggles.genFigureImage,
+      signal: a.controller.signal,
+      log: addLog,
+      onCommit: (fig) => {
+        figuresRef.current.set(a.id, fig);
+        setFigures(new Map(figuresRef.current));
+      },
+    });
 
   const onMmdChange = (next: string) => {
     setMmd(next);
@@ -594,6 +643,7 @@ export default function PdfToDocxConverter({ apiKey, models, restore, restoreSeq
           issues={issues}
           notes={notes}
           figures={figures}
+          figureOutcomes={outcomes}
           fileName={sourceName}
           busy={busy}
           wordOptions={wordOptions}

@@ -64,11 +64,25 @@ export async function scoreRedraw(
   cropBase64: string,
   tikzBase64: string,
   kind: FigureCategory,
+  /** `models` và `signal`: thiếu là luôn gọi model bậc 1 và không dừng được. `context` = đề bài. */
+  net: { models?: string[]; signal?: AbortSignal; context?: string } = {},
 ): Promise<RedrawVerdict> {
   try {
     const res = await callGemini(apiKey, {
       parts: [
         { text: prompt(kind) },
+        // Đề bài giúp bắt lỗi mà hai ảnh cạnh nhau không bắt được: nhãn đọc ĐƯỢC nhưng SAI tên
+        // (vẽ đỉnh $D$ ở chỗ đề gọi là $D'$). Kèm câu chặn để đề không thành cớ nhận thêm chi tiết.
+        ...(net.context
+          ? [
+              {
+                text:
+                  'ĐỀ BÀI quanh hình — chỉ dùng để đọc những nhãn bị mờ trong ảnh 1:\n<<<\n' +
+                  net.context +
+                  '\n>>>\nThứ mà ĐỀ nhắc nhưng ẢNH 1 KHÔNG CÓ thì ảnh 2 cũng KHÔNG ĐƯỢC CÓ.',
+              },
+            ]
+          : []),
         { text: 'ẢNH 1 — ảnh cắt từ đề gốc:' },
         { inlineData: { data: cropBase64, mimeType: 'image/png' } },
         { text: 'ẢNH 2 — bản vẽ lại bằng TikZ:' },
@@ -77,6 +91,8 @@ export async function scoreRedraw(
       temperature: TEMP_PRECISE,
       responseSchema: SCHEMA,
       label: 'tikz-score',
+      models: net.models,
+      signal: net.signal,
     });
     const parsed = JSON.parse(res.text) as {
       giu?: string;

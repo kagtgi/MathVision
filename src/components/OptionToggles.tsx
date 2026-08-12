@@ -1,17 +1,18 @@
-/** Các công tắc điều khiển pipeline, dùng chung cho hai chế độ. */
+/**
+ * Giao diện các công tắc điều khiển pipeline, dùng chung cho hai chế độ.
+ *
+ * KIỂU và MẶC ĐỊNH nằm ở `pipeline/toggles.ts` (không DOM) vì `history/serialize.ts` cần
+ * `DEFAULT_TOGGLES` như một giá trị mà vẫn phải import được từ Node. Re-export ở đây để mọi
+ * chỗ đang `import { type PipelineToggles } from './components/OptionToggles'` vẫn chạy.
+ */
 
-export interface PipelineToggles {
-  /** Chuẩn hoá bố cục đề thi (bỏ phiếu tô, tiêu đề PHẦN, mục ĐÁP ÁN CHI TIẾT). */
-  examMode: boolean;
-  /** Tự giải đề khi tài liệu chưa có lời giải. */
-  autoSolve: boolean;
-  /** Giải hai lượt rồi đối chiếu, lệch thì có lượt thứ ba phân xử. */
-  doubleCheck: boolean;
-  /** Cho phép tự vẽ hình minh hoạ cho bài hình học. */
-  drawFigures: boolean;
-  /** Ưu tiên dựng lại hình vẽ bằng TikZ; hỏng thì rơi về ảnh cắt từ đề. */
-  redrawTikz: boolean;
-}
+import {
+  DEFAULT_TOGGLES,
+  HIDDEN_IN_IMAGE_MODE,
+  type PipelineToggles,
+} from '../pipeline/toggles.ts';
+
+export { DEFAULT_TOGGLES, HIDDEN_IN_IMAGE_MODE, type PipelineToggles };
 
 interface Props {
   value: PipelineToggles;
@@ -55,10 +56,16 @@ const ROWS: Array<{
     label: 'Ưu tiên vẽ lại hình bằng TikZ',
     hint: 'Hình vẽ được dựng lại cho nét; ảnh chụp vật thật giữ nguyên ảnh gốc',
   },
+  {
+    key: 'genFigureImage',
+    label: 'TikZ hỏng thì nhờ AI dựng ảnh',
+    hint: 'Chỉ cho hình mô hình vật thật; đọc kèm đề bài; không đạt thì vẫn giữ ảnh cắt',
+    dependsOn: 'redrawTikz',
+  },
 ];
 
 export default function OptionToggles({ value, onChange, disabled, hideRedraw }: Props) {
-  const rows = hideRedraw ? ROWS.filter((r) => r.key !== 'redrawTikz') : ROWS;
+  const rows = hideRedraw ? ROWS.filter((r) => !HIDDEN_IN_IMAGE_MODE.includes(r.key)) : ROWS;
 
   return (
     <div>

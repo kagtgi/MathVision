@@ -16,7 +16,7 @@
 
 import type { QcIssue } from '../pipeline/qc.ts';
 import type { FigureSource } from '../pipeline/figures.ts';
-import type { WordOptionsValue } from '../components/WordOptions.tsx';
+import type { WordOptionsValue } from '../pipeline/wordOptions.ts';
 import type { PipelineToggles } from '../components/OptionToggles.tsx';
 
 export const HISTORY_SCHEMA_VERSION = 1;

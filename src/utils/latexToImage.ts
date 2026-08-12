@@ -1,20 +1,13 @@
 import { sanitizeTikz } from './tikzSanitize.ts';
+// MIN_INK_RATIO là một SỐ ĐO nên nằm cùng chỗ với các số đo khác. Ở đó nó cũng dùng được từ
+// Node (bộ đo corpus chấm điểm bằng chính ngưỡng này), còn file này thì cần DOM.
+import { MIN_INK_RATIO } from './tikzCapabilities.ts';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const RETINA_SCALE = 2;
 const TIKZ_RENDER_TIMEOUT_MS = 30000;
 const MIN_TIKZ_DIMENSION = 100;
-
-/**
- * Dưới ngưỡng này coi như KHÔNG dựng được.
- *
- * Vì sao cần: ra được `<svg>` không có nghĩa là ra được hình. Một `tikzpicture` rỗng vẫn
- * sinh SVG hợp lệ, rồi `MIN_TIKZ_DIMENSION` biến nó thành PNG trắng 100×100 — và bản trắng
- * đó đi thẳng vào file Word. Đo mực là phép kiểm duy nhất bắt được.
- * Đối chiếu: hình thật trong bộ probe đo được 1,7%–13% mực.
- */
-const MIN_INK_RATIO = 0.002;
 
 // ─── TikZ preprocessing for TikZJax compatibility ───────────────────────────
 // TikZJax doesn't support PGF math functions (sqrt, sin, cos, etc.) in
@@ -258,10 +251,17 @@ export interface TikzRenderResult {
  *
  * `onNote` nhận những gì bộ lọc đã sửa (bỏ dấu tiếng Việt, bỏ thư viện không có…) để đưa vào
  * nhật ký xử lý. Trước đây mọi thất bại đều im lặng, không phân biệt được treo với sai cú pháp.
+ *
+ * `onSvg` nhận CHUỖI SVG đã nhúng font, ngay trước lúc rasterise. Chỉ bộ đo dùng
+ * (`src/devtools/tikzCorpus`), app không truyền. Có nó vì hai số đo quan trọng nhất về nhãn
+ * chỉ đọc được ở đây: số node `<text>` (nhãn có ra hay không) và số rule `@font-face` (font
+ * có nhúng được hay không — đúng lỗi 1.2 làm cả 140 rule fonts.css 404 mà mọi phép kiểm khác
+ * đều bỏ qua). Không có hook này thì bộ đo phải dựng lần hai, tức gấp đôi 5 phút cho 47 hình.
  */
 export async function tikzToImage(
   tikzCode: string,
   onNote?: (note: string) => void,
+  onSvg?: (svgXml: string) => void,
 ): Promise<TikzRenderResult | null> {
   // Lọc TRƯỚC khi dựng: bốn thứ đo được là chết hẳn (xem tikzSanitize.ts) đều phải bị chặn ở
   // đây, không thì mất trọn 30 giây timeout rồi rơi hình mà không ai biết vì sao.
@@ -308,6 +308,7 @@ export async function tikzToImage(
     // TikZJax xuất chữ dưới dạng <text font-family="cmr10">, KHÔNG phải <path> (bản trước
     // ghi ngược ở đây). Nghĩa là nhãn phụ thuộc font ngoài — xem `embedTikzFonts`.
     const svgData = await embedTikzFonts(new XMLSerializer().serializeToString(svg));
+    onSvg?.(svgData);
     const svgUrl = URL.createObjectURL(new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' }));
 
     const result = await new Promise<TikzRenderResult | null>((resolve) => {

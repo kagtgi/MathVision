@@ -343,32 +343,59 @@ const QUES = /^\**Câu\s+\d+\s*[.:]/;
 const DETAIL_HEAD = /^#\s*ĐÁP ÁN CHI TIẾT/;
 const EXAM_HEAD = /^##\s+\S/;
 
-/** Dòng này có phải tiêu đề phần không, và thuộc loại nào (nhận cả biến thể OCR). */
-export function asHeading(line: string): { type: PartType } | null {
+/**
+ * Dòng này có phải tiêu đề phần không, và thuộc loại nào (nhận cả biến thể OCR).
+ *
+ * `type: null` = ĐÚNG là tiêu đề phần nhưng tiêu đề KHÔNG nói loại câu. Đề chính thức THPT 2025
+ * viết PHẦN III là "Thí sinh trả lời từ câu 1 đến câu 6." — không có chữ nào cho biết đó là trả
+ * lời ngắn. Trả `null` để `typeFromBody` quyết định, thay vì bỏ luôn cả tiêu đề như bản trước
+ * (khi đó PHẦN III không thành một phần riêng, không được đặt tên chuẩn, và các câu của nó bị
+ * suy loại lẻ tẻ theo từng câu).
+ */
+export function asHeading(line: string): { type: PartType | null } | null {
   const t = line.trim().replace(/^#{1,6}\s*/, '').replace(/^\*\*|\*\*$/g, '').trim();
   if (!t || QUES.test(t)) return null;
   if (t.length > 110) return null;
   const low = t.toLowerCase();
+  // `đúng HOẶC sai` (có chữ đệm) là cách viết của đề chính thức THPT 2025 — đo trên đề 2025 mã
+  // 0101: bản trước chỉ khớp `đúng-sai` liền nên KHÔNG nhận ra tiêu đề PHẦN II của đề đó.
+  const dungSai = /đ[úu]ng\s*(?:hoặc|hay)?\s*[-–—]?\s*sai/i;
+  // "Thí sinh trả lời từ câu X đến câu Y" là câu mở đầu của CẢ BA phần trong đề chính thức
+  // THPT 2025 — nhận nó làm dấu hiệu tiêu đề, kể cả khi phần còn lại không nói loại câu.
+  const thiSinhTraLoi = /thí sinh trả lời\s*(?:từ\s*)?câu/i;
   const looksPart =
     /^(phần|\(?\d\)?\s*[.)-]?\s*|[①-⑥]\s*|[ivx]+\s*[.)]\s*)/i.test(t) &&
-    /(trắc nghiệm|trấc nghiệm|tự luận|tu luan|phương án|đúng\s*[-–—]?\s*sai|trả lời ngắn|trả lời ngấn|câu hỏi)/i.test(
-      low,
-    );
+    (dungSai.test(low) ||
+      thiSinhTraLoi.test(low) ||
+      /(trắc nghiệm|trấc nghiệm|tự luận|tu luan|phương án|trả lời ngắn|trả lời ngấn|câu hỏi)/i.test(
+        low,
+      ));
   if (!looksPart) return null;
   let type: PartType | null = null;
-  if (/đúng\s*[-–—]?\s*sai|đung\s*[-–—]?\s*sai/i.test(low)) type = 'DS';
+  if (dungSai.test(low)) type = 'DS';
   else if (/trả lời ngắn|trả lời ngấn|tra loi ngan/i.test(low)) type = 'TLN';
   else if (/tự luận|tu luan/i.test(low)) type = 'TL';
   else if (/trắc nghiệm|trấc nghiệm|phương án|lựa chọn/i.test(low)) type = 'TN';
-  return type ? { type } : null;
+  // Là tiêu đề phần thì luôn trả về, kể cả khi chưa biết loại — `typeFromBody` lo phần còn lại.
+  return { type };
 }
 
-/** Suy loại phần từ nội dung khi không có tiêu đề. */
+/**
+ * Suy loại phần từ nội dung khi không có tiêu đề.
+ *
+ * CHỈ chạy khi `asHeading` không nhận ra tiêu đề — phần có tiêu đề chuẩn thì loại lấy từ đó, nên
+ * 25 đề golden không đi qua đây.
+ */
 export function typeFromBody(lines: string[]): PartType {
   const txt = lines.join('\n');
   if ((txt.match(/(?:^|\n)\s*(?:__|\*\*)?[A-D](?:__|\*\*)?\s*[.)]\s/g) || []).length >= 3) return 'TN';
   if (/(?:^|\n)\s*a\)\s/.test(txt) && /(?:^|\n)\s*b\)\s/.test(txt)) return 'DS';
   if (/(?:^|\n)Đáp số\s*:/.test(txt)) return 'TLN';
+  // Đề chính thức THPT 2025 ghi tiêu đề PHẦN III là "Thí sinh trả lời từ câu 1 đến câu 6." —
+  // KHÔNG có chữ "trả lời ngắn", nên tiêu đề không nói được loại. Đo trên mã đề 0101: cả 6 câu
+  // rơi về `TL`, và hệ quả là KHÔNG câu nào có dòng "Đáp số:" trong đáp án.
+  // Dấu hiệu còn lại nằm ở chính câu hỏi: dạng trả lời ngắn luôn hỏi ra MỘT SỐ.
+  if (/bằng bao nhiêu|là bao nhiêu|làm tròn đến/i.test(txt)) return 'TLN';
   return 'TL';
 }
 

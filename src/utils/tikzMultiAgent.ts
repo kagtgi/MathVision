@@ -22,7 +22,21 @@ import {
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
-const AGENT_TIMEOUT_MS = 120_000; // 2 minutes (reduced from 3 — Gemini Pro rarely needs >90s)
+/**
+ * Hạn cho MỘT LƯỢT GỌI, truyền thẳng cho `callGemini`.
+ *
+ * Bản trước bọc `withTimeout(120s)` (một `Promise.race`) quanh `callGemini` mà hạn mỗi lượt của
+ * chính nó cũng là 120s, với 3 lượt thử × 5 model. Hai hệ quả đo được:
+ *   - Vòng dự phòng của `callGemini` CHẾT HẲN cho mọi lượt gọi TikZ: chỉ cần một lần backoff 429
+ *     hay một lần bước model là cái race bên ngoài nổ trước, không bao giờ tới được model kế.
+ *   - `Promise.race` không huỷ fetch — đúng cái anti-pattern mà `geminiClient` được viết ra để
+ *     loại bỏ (xem chú thích đầu file đó). Lượt gọi bị bỏ rơi vẫn chạy tiếp và vẫn tốn hạn mức.
+ *
+ * Đo trên đề THPT 2025: hình `p4_f1` mất ĐÚNG 120 000 ms rồi báo "TikZ generation failed" — nó
+ * không sinh mã hỏng, nó hết giờ. 45s mỗi lượt cho hỏng nhanh gấp 2,7 lần và để dành thời gian
+ * cho chuỗi model làm việc thật.
+ */
+const CALL_TIMEOUT_MS = 45_000;
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -48,9 +62,36 @@ export interface TikzProgressCallback {
  * Template dưới đây bỏ hai dòng `% Required: \usepackage{tikz}` của bản cũ: chúng là comment
  * nên vô tác dụng, mà lại dạy model viết `\usepackage` — thứ làm chết hình nếu nó bỏ dấu `%`.
  */
-const draftPrompt = (kind: FigureCategory) => `Bạn là chuyên gia TikZ. Nhìn kỹ ảnh hình vẽ này.
+/**
+ * Khối ĐỀ BÀI gửi kèm khi vẽ lại.
+ *
+ * Bản trước KHÔNG gửi: người viết mã TikZ chỉ nhìn ảnh cắt 144 DPI, mờ và hay dính chữ câu bên
+ * cạnh. Trong khi `upgradeFigure` đã cầm sẵn đề bài và vẫn gửi cho trọng tài lẫn đường sinh ảnh —
+ * chỉ riêng chỗ VIẾT MÃ là không có. Đo trên đề THPT 2025, hai trong ba ca thua là lỗi mà đề bài
+ * nói rõ: "thiếu đoạn nối P và A" và "đồ thị cắt Oy sai dấu tung độ".
+ *
+ * Hai thẩm quyền phải tách như bên `figureGenPrompts`: ẢNH quyết định HÌNH, ĐỀ quyết định NGHĨA.
+ */
+const contextBlock = (context: string) =>
+  context
+    ? `
+ĐỀ BÀI của câu chứa hình — dùng để ĐỌC RÕ ảnh, KHÔNG dùng để thay ảnh:
+<<<
+${context}
+>>>
+CÁCH DÙNG: đề cho biết điểm nào tên gì, đâu là trung điểm / chân đường vuông góc / hình chiếu,
+đoạn nào bài đang hỏi. Dùng nó khi nhãn trong ảnh bị mờ hoặc khi không rõ một nét là cạnh hay
+đoạn phụ.
+GIỚI HẠN: ẢNH vẫn là bản CHUẨN về hình. Đề nói có mà ảnh KHÔNG VẼ thì KHÔNG vẽ. Đề lệch ảnh thì
+theo ảnh (đề ghi "đáy là hình vuông" mà ảnh vẽ hình bình hành nghiêng thì vẽ bình hành nghiêng —
+đó là phép chiếu song song). KHÔNG thêm số đo mà ảnh không in.
+`
+    : '';
+
+const draftPrompt = (kind: FigureCategory, context = '') => `Bạn là chuyên gia TikZ. Nhìn kỹ ảnh hình vẽ này.
 
 Viết mã TikZ ĐẦY ĐỦ, DỰNG ĐƯỢC, tái hiện đúng hình trong ảnh.
+${contextBlock(context)}
 
 KHUÔN mã:
 \\begin{tikzpicture}[line cap=round, line join=round, >=Stealth]
@@ -71,7 +112,8 @@ ${figureRulesFor(kind)}
 
 CHỈ xuất mã TikZ. Không giải thích, không bọc trong dấu \`\`\`.`;
 
-const verifyPrompt = (kind: FigureCategory) => `Bạn là người soát chất lượng mã TikZ. Bạn nhận:
+const verifyPrompt = (kind: FigureCategory, context = '') => `Bạn là người soát chất lượng mã TikZ. Bạn nhận:
+${contextBlock(context)}
 1. ảnh hình gốc,
 2. một hoặc hai bản mã TikZ ứng viên.
 
@@ -114,13 +156,6 @@ TỰ KIỂM trước khi xuất FINAL_CODE:
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
-  const timeout = new Promise<T>((_, reject) =>
-    setTimeout(() => reject(new Error(`${label} timed out after ${ms / 1000}s`)), ms),
-  );
-  return Promise.race([promise, timeout]);
-}
-
 export function extractTikzCode(text: string): string {
   // From FINAL_CODE: or TIKZ_CODE: marker
   const markerMatch = text.match(/(?:FINAL_CODE|TIKZ_CODE):\s*\n([\s\S]*)/);
@@ -157,9 +192,26 @@ function extractReasoning(text: string): string {
 /**
  * Đi qua wrapper chung: có chuỗi model dự phòng, backoff theo retryDelay của Google,
  * và huỷ thật khi người dùng bấm dừng.
+ *
+ * `models` và `signal` BẮT BUỘC phải chuyền tiếp. Bản trước bỏ cả hai, nên 2-3 lượt gọi mỗi
+ * hình luôn bắt đầu ở model bậc 1 dù `checkApiKey` đã lọc ra là tài khoản không có nó, và vẫn
+ * đốt hạn mức sau khi người dùng bấm Dừng.
  */
-function callModel(apiKey: string, parts: GeminiPart[], temperature: number) {
-  return callGemini(apiKey, { parts, temperature, label: 'tikz' });
+function callModel(
+  apiKey: string,
+  parts: GeminiPart[],
+  temperature: number,
+  o?: { models?: string[]; signal?: AbortSignal },
+) {
+  return callGemini(apiKey, {
+    parts,
+    temperature,
+    label: 'tikz',
+    models: o?.models,
+    signal: o?.signal,
+    // Hạn THẬT (abort), không phải Promise.race — xem chú thích ở CALL_TIMEOUT_MS.
+    timeoutMs: CALL_TIMEOUT_MS,
+  });
 }
 
 // ─── Pipeline ────────────────────────────────────────────────────────────────
@@ -174,9 +226,24 @@ export async function generateTikzMultiAgent(
   apiKey: string,
   imageBase64: string,
   mimeType: string,
-  options?: { onProgress?: TikzProgressCallback; draftA?: string; kind?: FigureCategory },
+  options?: {
+    onProgress?: TikzProgressCallback;
+    draftA?: string;
+    kind?: FigureCategory;
+    /** Chuỗi model đã lọc theo tài khoản. Thiếu là mọi lượt gọi bắt đầu ở model có thể không có. */
+    models?: string[];
+    /** Thiếu là bấm Dừng rồi vẫn đốt hạn mức. */
+    signal?: AbortSignal;
+    /**
+     * Đề bài của câu chứa hình. Bản trước KHÔNG có: người viết mã chỉ nhìn ảnh cắt mờ, trong khi
+     * trọng tài và đường sinh ảnh đều đã được đọc đề. Xem `contextBlock`.
+     */
+    context?: string;
+  },
 ): Promise<TikzGenerationResult> {
   const { onProgress, draftA } = options ?? {};
+  const net = { models: options?.models, signal: options?.signal };
+  const ctx = options?.context ?? '';
   // `ve` = hình vẽ chưa rõ loại; luật chung, đúng như hành vi trước 1.2.0.
   const kind: FigureCategory = options?.kind ?? 've';
   const img = { inlineData: { data: imageBase64, mimeType } };
@@ -194,10 +261,11 @@ export async function generateTikzMultiAgent(
     log.push('Step 1: Generating independent Draft B...');
 
     try {
-      const respB = await withTimeout(
-        callModel(apiKey, [{ text: draftPrompt(kind) }, img], TEMP_CREATIVE),
-        AGENT_TIMEOUT_MS,
-        'DraftB',
+      const respB = await callModel(
+        apiKey,
+        [{ text: draftPrompt(kind, ctx) }, img],
+        TEMP_CREATIVE,
+        net,
       );
       const codeB = extractTikzCode(respB.text || '');
       if (codeB.includes('\\begin{tikzpicture}')) {
@@ -213,16 +281,10 @@ export async function generateTikzMultiAgent(
     onProgress?.('describe', 'Generating two TikZ drafts in parallel...');
     log.push('Step 1: Running two independent drafts in parallel...');
 
-    const callA = withTimeout(
-      callModel(apiKey, [{ text: draftPrompt(kind) }, img], TEMP_STANDARD),
-      AGENT_TIMEOUT_MS,
-      'DraftA',
-    );
-    const callB = withTimeout(
-      callModel(apiKey, [{ text: draftPrompt(kind) }, img], TEMP_CREATIVE),
-      AGENT_TIMEOUT_MS,
-      'DraftB',
-    );
+    const callA = callModel(apiKey, [{ text: draftPrompt(kind, ctx) }, img], TEMP_STANDARD, net);
+    // Bản B TRƯỚC ĐÂY quên truyền `net`, nên riêng nó không có chuỗi model đã lọc và không dừng
+    // được khi người dùng bấm Dừng — một nửa số lượt gọi nháp bị bỏ sót.
+    const callB = callModel(apiKey, [{ text: draftPrompt(kind, ctx) }, img], TEMP_CREATIVE, net);
 
     const [respA, respB] = await Promise.allSettled([callA, callB]);
 
@@ -259,18 +321,15 @@ export async function generateTikzMultiAgent(
     .map((code, i) => `=== DRAFT ${String.fromCharCode(65 + i)} ===\n${code}`)
     .join('\n\n');
 
-  const verifyResponse = await withTimeout(
-    callModel(
-      apiKey,
-      [
-        { text: verifyPrompt(kind) },
-        img,
-        { text: `${draftText}\n\nVerify and produce the final code.` },
-      ],
-      TEMP_PRECISE,
-    ),
-    AGENT_TIMEOUT_MS,
-    'Verifier',
+  const verifyResponse = await callModel(
+    apiKey,
+    [
+      { text: verifyPrompt(kind, ctx) },
+      img,
+      { text: `${draftText}\n\nVerify and produce the final code.` },
+    ],
+    TEMP_PRECISE,
+    net,
   );
 
   const verifyText = verifyResponse.text || '';

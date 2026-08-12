@@ -1,7 +1,7 @@
 {
   "name": "math-vision",
   "private": true,
-  "version": "1.2.1",
+  "version": "1.3.0",
   "description": "Chuyển đề thi toán từ ảnh hoặc PDF thành file Word đúng chuẩn, tự giải và sinh đáp án chi tiết.",
   "author": "MathVision Team",
   "license": "MIT",
@@ -22,8 +22,8 @@
     "lint": "tsc --noEmit",
     "electron:preview": "npm run build && electron .",
     "electron:build": "node scripts/fix-electron-cache.cjs && npm run build && electron-builder --win",
-    "verify": "node scripts/verify-pipeline.mjs && node scripts/verify-docx.mjs && node scripts/verify-numbering.mjs && node scripts/verify-tikz-sanitize.mjs && node scripts/verify-history.mjs && node scripts/verify-solver-shape.mjs && node scripts/verify-vdc.mjs && node scripts/verify-textlayer.mjs && node scripts/verify-download.mjs && node scripts/verify-update.mjs && node scripts/verify-secrets.mjs && node scripts/verify-history-app.mjs",
-    "verify:ci": "node scripts/verify-numbering.mjs && node scripts/verify-tikz-sanitize.mjs && node scripts/verify-history.mjs && node scripts/verify-solver-shape.mjs && node scripts/verify-vdc.mjs && node scripts/verify-textlayer.mjs"
+    "verify": "node scripts/verify-pipeline.mjs && node scripts/verify-docx.mjs && node scripts/verify-numbering.mjs && node scripts/verify-tikz-sanitize.mjs && node scripts/verify-tikz-corpus.mjs && node scripts/verify-figure-policy.mjs && node scripts/verify-figure-gen.mjs && node scripts/verify-history.mjs && node scripts/verify-solver-shape.mjs && node scripts/verify-vdc.mjs && node scripts/verify-textlayer.mjs && node scripts/verify-download.mjs && node scripts/verify-update.mjs && node scripts/verify-secrets.mjs && node scripts/verify-history-app.mjs",
+    "verify:ci": "node scripts/verify-numbering.mjs && node scripts/verify-tikz-sanitize.mjs && node scripts/verify-tikz-corpus.mjs && node scripts/verify-figure-policy.mjs && node scripts/verify-figure-gen.mjs && node scripts/verify-history.mjs && node scripts/verify-solver-shape.mjs && node scripts/verify-vdc.mjs && node scripts/verify-textlayer.mjs"
   },
   "dependencies": {
     "@google/genai": "^1.29.0",

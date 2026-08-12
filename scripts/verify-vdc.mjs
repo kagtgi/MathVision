@@ -16,6 +16,8 @@ import { applyVdcLatex } from '../src/pipeline/vdcLatex.ts';
 const GREEN = (s) => `\x1b[32m${s}\x1b[0m`;
 const RED = (s) => `\x1b[31m${s}\x1b[0m`;
 
+const { makePng } = await import('./lib/png.mjs');
+
 const MMD = `PHẦN I. CÂU TRẮC NGHIỆM NHIỀU PHƯƠNG ÁN LỰA CHỌN
 
 Câu 1. Cho hình chóp $S.ABCD$. Góc giữa $SC$ và $(ABCD)$ bằng
@@ -27,6 +29,9 @@ D. $90^{\\circ}$.
 # ĐÁP ÁN CHI TIẾT
 
 Câu 1. Cho hình chóp $S.ABCD$. Góc giữa $SC$ và $(ABCD)$ bằng
+
+![](#de_f1)
+
 A. $30^{\\circ}$.
 __B.__ $45^{\\circ}$.
 C. $60^{\\circ}$.
@@ -35,6 +40,8 @@ D. $90^{\\circ}$.
 Lời giải
 
 Chọn B.
+
+![](#sol_c1_f1)
 
 Ta có $SA \\perp (ABCD)$ nên góc bằng $45^{\\circ}$.
 
@@ -51,7 +58,13 @@ Lời giải
 `;
 
 // ── Kiểm docx ────────────────────────────────────────────────────────────────
-const buf = await Packer.toBuffer(buildVdcDocx(applyVdcLatex(MMD)));
+const figs = new Map([
+  ['de_f1', { bytes: makePng(400, 300), w: 400, h: 300 }],
+  ['sol_c1_f1', { bytes: makePng(360, 260, 1), w: 360, h: 260 }],
+]);
+const resolveFigure = (ref) => figs.get(String(ref).replace(/^#/, '')) ?? null;
+
+const buf = await Packer.toBuffer(buildVdcDocx(applyVdcLatex(MMD), resolveFigure));
 const xml = buf.toString('latin1');
 // Nội dung tiếng Việt nằm trong zip đã nén, nên đọc XML thô không thấy chữ.
 // Dùng bản không nén để soi: docx lib nén, ta bung bằng cách so trên chuỗi thuộc tính.
@@ -71,6 +84,11 @@ const cauLevelRpr = (() => {
   return '';
 })();
 const numberedParas = (doc.match(/<w:numPr>/g) ?? []).length;
+
+/** Đoạn chứa ảnh, theo thứ tự: [0] trong khối đề, [1] trong lời giải. */
+const imgParas = [...doc.matchAll(/<w:p\b[\s\S]*?<\/w:p>/g)]
+  .map((m) => m[0])
+  .filter((p) => p.includes('<w:drawing>'));
 
 const checks = [
   ['font Palatino Linotype', () => /w:ascii="Palatino Linotype"/.test(doc)],
@@ -96,6 +114,17 @@ const checks = [
       new RegExp(`<w:num w:numId="${m[1]}"`).test(numbering),
     )],
   ['nền khối đề C5E0B3', () => /w:fill="C5E0B3"/.test(doc)],
+  // ĐO trên 6 file mẫu VDC: 29/29 đoạn ảnh nằm giữa hai đoạn đã tô thì ĐỀU có nền. Bản trước
+  // không tô đoạn ảnh nên nền bị chẻ thành hai dải xanh với một khe TRẮNG ở giữa — xảy ra với
+  // cả 6 hình của 25 đề golden, mà assert `w:fill` ở trên một mình không thấy.
+  ['ảnh trong khối đề CÓ nền xanh (không chọc dải trắng)', () => {
+    const p = imgParas[0] ?? '';
+    return /w:fill="C5E0B3"/.test(p);
+  }],
+  ['ảnh trong lời giải KHÔNG tô nền, và thụt theo cột lời giải', () => {
+    const p = imgParas[1] ?? '';
+    return !/w:fill="C5E0B3"/.test(p) && /<w:ind w:left="720"/.test(p);
+  }],
   ['tab phương án 3330/6030/8370', () => /w:pos="3330"/.test(doc) && /w:pos="6030"/.test(doc) && /w:pos="8370"/.test(doc)],
   ['phương án thụt 900', () => /<w:ind w:left="900"/.test(doc)],
   ['đáp án đúng đỏ FF0000', () => /<w:color w:val="FF0000"\/>/.test(doc)],

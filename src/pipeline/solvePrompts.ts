@@ -8,7 +8,11 @@
  */
 
 import { LATEX_MATH_RULES } from '../utils/sharedPrompts.ts';
-import { FIGURE_STYLE_BRIEF, figureRulesFor } from '../utils/figurePrompts.ts';
+import {
+  FIGURE_STYLE_BRIEF,
+  figureRulesFor,
+  type FigureCategory,
+} from '../utils/figurePrompts.ts';
 import { tikzCapsRules } from '../utils/tikzCapabilities.ts';
 
 export type QType = 'TN' | 'DS' | 'TLN' | 'TL';
@@ -67,15 +71,19 @@ Quyết định có vẽ hay không:
 - TOẠ ĐỘ Oxyz -> tự cân nhắc: vẽ khi hình giúp thấy quan hệ (mặt cầu tiếp xúc mặt
   phẳng, vị trí tương đối, hình chiếu, khoảng cách); KHÔNG vẽ khi bài thuần tính toán
   toạ độ / phương trình, vẽ thừa chỉ làm rối.
-- Đề ĐÃ CÓ HÌNH -> veHinh = false.
-- Bài thuần đại số, thống kê, dãy số, tổ hợp mà hình không thêm thông tin gì ->
-  veHinh = false. (Riêng bảng số liệu thống kê thì gõ thành BẢNG, không vẽ.)
+- ĐỀ ĐÃ CÓ HÌNH thì VẪN VẼ, nếu lời giải cần thêm đường phụ. Hình trong đề là hình
+  CHƯA dựng thêm gì; hình của lời giải phải có đường cao, chân đường vuông góc, hình
+  chiếu, góc cần tính, thiết diện — đúng những thứ lời giải nhắc tới. Chỉ trả
+  veHinh = false khi hình của đề đã đủ và lời giải không dựng thêm gì cả.
+- Bài thuần đại số, thống kê, dãy số, tổ hợp, xác suất mà hình không thêm thông tin gì
+  -> veHinh = false. (Riêng bảng số liệu thống kê thì gõ thành BẢNG, không vẽ.)
 - Luôn ghi lyDoHinh một câu ngắn giải thích quyết định.
 
 Khi vẽ, hình phải HOÀN CHỈNH:
 - Đủ đỉnh, mỗi đỉnh có nhãn đặt ngoài hình.
 - Vẽ đủ đường cao, đoạn phụ, chân đường vuông góc mà lời giải có nhắc tới.
 - Đánh dấu góc vuông ở nơi cần thiết.
+- Giữ NGUYÊN tên điểm mà đề đã dùng. Đổi tên là biến hình thành của một bài khác.
 
 ${FIGURE_STYLE_BRIEF}
 
@@ -132,7 +140,7 @@ export function solvePrompt(type: QType, variant: 0 | 1 | 2): string {
  * có hình (vài hình mỗi đề), còn `solvePrompt` gửi kèm mỗi câu (vài chục câu mỗi đề). Đặt luật
  * dài ở đây thay vì ở đó tiết kiệm ~250.000 token input mỗi lần chạy.
  */
-export function figureCheckPrompt(questionText: string): string {
+export function figureCheckPrompt(questionText: string, kind: FigureCategory = 'khonggian'): string {
   return [
     'Đây là hình minh hoạ vừa được dựng cho câu hỏi bên dưới.',
     '',
@@ -151,14 +159,12 @@ export function figureCheckPrompt(questionText: string): string {
     'Nếu CHƯA ĐẠT: trả về mã TikZ đã sửa, bắt đầu bằng \\begin{tikzpicture} và kết thúc' +
       ' bằng \\end{tikzpicture}, không kèm lời dẫn.',
     '',
+    // MỘT khối luật, theo loại mà `figurePolicy` đã chốt. Bản trước nhồi cả ba
+    // (khonggian + bbt + dothi), mà `figureRulesFor` tự ghép SGK_STYLE_RULES +
+    // THINK_FIRST_RULES + tikzCapsRules vào mỗi lần gọi — nên một prompt soi hình mang ba bản
+    // sao của cùng ba khối chung. Vừa đắt vừa loãng đúng phần luật riêng cần đọc.
     'Áp đúng quy ước của loại hình đang vẽ:',
-    figureRulesFor('khonggian'),
-    '',
-    'Nếu là BẢNG BIẾN THIÊN:',
-    figureRulesFor('bbt'),
-    '',
-    'Nếu là ĐỒ THỊ HÀM SỐ:',
-    figureRulesFor('dothi'),
+    figureRulesFor(kind),
   ].join('\n');
 }
 

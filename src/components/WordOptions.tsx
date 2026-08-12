@@ -7,14 +7,12 @@
 
 import { FORMATS, type DocFormat } from '../pipeline/formats';
 import { FONT_PRESETS, type FontPresetId } from '../pipeline/fonts';
+// Kiểu + mặc định nằm ở `pipeline/wordOptions.ts` (không DOM) vì `history/store.ts` cần
+// `DEFAULT_WORD_OPTIONS` như một giá trị mà vẫn import được từ Node. Re-export để mọi chỗ đang
+// import từ file này vẫn chạy.
+import { DEFAULT_WORD_OPTIONS, type WordOptionsValue } from '../pipeline/wordOptions';
 
-export interface WordOptionsValue {
-  format: DocFormat;
-  /** `null` = dùng font mặc định của định dạng. */
-  fontId: FontPresetId | null;
-  /** Số câu bắt đầu, chỉ dùng cho định dạng VDC. */
-  startNumber: number;
-}
+export { DEFAULT_WORD_OPTIONS, type WordOptionsValue };
 
 interface Props {
   value: WordOptionsValue;
@@ -89,12 +87,35 @@ export default function WordOptions({ value, onChange, disabled, variant }: Prop
     />
   );
 
+  // Chuẩn VDC không có footer (đo từ file mẫu), nên công tắc chỉ có nghĩa với định dạng thường.
+  const pageNumberToggle = value.format !== 'vdc' && (
+    <label
+      className={`flex items-center gap-2 ${inline ? 'h-[30px] px-2' : ''} ${
+        disabled ? 'opacity-40' : 'cursor-pointer'
+      }`}
+      title='In dòng "Trang N" ở chân mỗi trang'
+    >
+      <input
+        type="checkbox"
+        checked={value.pageNumbers}
+        disabled={disabled}
+        onChange={(e) => onChange({ ...value, pageNumbers: e.target.checked })}
+        className="w-3.5 h-3.5 shrink-0 rounded"
+        style={{ accentColor: 'var(--accent)' }}
+      />
+      <span className="text-[12.5px] whitespace-nowrap" style={{ color: 'var(--ink)' }}>
+        Số trang
+      </span>
+    </label>
+  );
+
   if (inline) {
     return (
       <>
         {formatSelect}
         {fontSelect}
         {startInput}
+        {pageNumberToggle}
       </>
     );
   }
@@ -115,12 +136,7 @@ export default function WordOptions({ value, onChange, disabled, variant }: Prop
           {startInput}
         </div>
       )}
+      {pageNumberToggle}
     </div>
   );
 }
-
-export const DEFAULT_WORD_OPTIONS: WordOptionsValue = {
-  format: 'k11',
-  fontId: null,
-  startNumber: 1,
-};

@@ -1,5 +1,45 @@
 # Lịch sử phiên bản
 
+## 1.3.1
+
+**Bản portable giờ tự cập nhật bằng một nút bấm.** Trước bản này nút "Cập nhật" của bản
+portable chỉ **mở trình duyệt** cho tải tay, rồi thầy phải tự xoá file cũ và đổi tên file
+mới — bản cài (NSIS) thì đã tự thay từ lâu. Nay bấm một cái là app tải bản mới về **đúng
+thư mục đang chạy**, đối chiếu SHA256, tự thoát, thay file rồi mở lại. Không thao tác tay
+nào.
+
+Ba chỗ trong đường này hỏng thì hỏng lặng lẽ, nên mỗi chỗ đều chốt bằng phép đo chứ không
+bằng suy luận:
+
+- **Chọn nhầm file là tải nhầm hẳn loại app.** Bản phát hành có 5 file, trong đó
+  `MathVision-Setup.exe` và `MathVision-Setup.exe.blockmap` chỉ khác vài ký tự so với file
+  portable. Đối chiếu với dữ liệu thật của bản 1.3.0: quy tắc chọn lấy đúng
+  `MathVision-1.3.0.exe`, loại cả bản cài lẫn blockmap.
+- **Không bao giờ chạy file chưa đối chiếu được hash.** Hash mong đợi được đọc **trước**
+  khi tải, và mọi tình huống không đọc được — thiếu dòng, hash méo, file rỗng — đều trả
+  chuỗi rỗng để bên gọi huỷ. Mọi đường vỡ (thư mục không ghi được, GitHub không trả lời,
+  tải hỏng, SHA256 lệch) đều rơi về mở trình duyệt như cũ.
+- **Hỏng giữa chừng thì không được mất app.** Bản mới vào chỗ **trước**, bản cũ dọn
+  **sau**. Làm ngược lại — xoá trước rồi chép hỏng — là thầy mất sạch app. Phép kiểm dựng
+  đúng cảnh đó và xác nhận file cũ còn nguyên vẹn.
+
+Phép kiểm cuối là loại đắt nhất: nó chép `ping.exe` thành "bản cũ", **chạy nó lên** cho
+Windows khoá file đúng như cảnh thật, rồi bắt lệnh thay file làm việc của nó — trên một
+đường dẫn **có dấu tiếng Việt và dấu cách**. Sáu biến thể cố tình làm sai (nới quy tắc chọn
+file, bỏ ba phép kiểm hash, bỏ vòng đợi hết khoá, đảo thứ tự chép–xoá) đều bị bắt.
+
+Đường dẫn có dấu chính là lý do lệnh thay file dùng PowerShell chứ không phải `.cmd`: file
+`.cmd` được đọc theo bảng mã OEM của máy, mà Node không ghi được bảng mã đó, nên
+`C:\Users\Nguyễn Văn A\Downloads` sẽ hỏng dấu và script trượt file. `-EncodedCommand` nhận
+base64 của UTF-16LE nên đường dẫn đi nguyên vẹn.
+
+Kèm hai chỗ rò trong bước tải: đầy đĩa thì `write` chờ một tín hiệu không bao giờ tới (nút
+quay mãi), và mạng treo ở bước hỏi GitHub thì không có hạn giờ. Nay cả hai đều rơi về mở
+trình duyệt.
+
+> **Lần này vẫn phải tải tay một lần.** Bản 1.3.0 trở về trước chưa có đường tự cập nhật
+> nên nó không thể tự nâng lên 1.3.1. Từ 1.3.1 trở đi thì một nút là xong.
+
 ## 1.3.0
 
 **Vẽ lại hình bằng TikZ giờ thắng gấp đôi, đo trên đề chính thức THPT 2025.** Chạy thật mã

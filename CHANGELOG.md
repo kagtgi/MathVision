@@ -2,6 +2,20 @@
 
 ## 1.3.0
 
+**Vẽ lại hình bằng TikZ giờ thắng gấp đôi, đo trên đề chính thức THPT 2025.** Chạy thật mã
+đề 0101 (5 hình vẽ): trước bản này **2/5** hình được thay bằng bản TikZ nét sạch, nay
+**4/5**. Ba thay đổi làm nên con số đó, không cái nào là tính năng mới:
+(1) **người viết mã TikZ giờ được đọc ĐỀ BÀI** — trước đó nó chỉ nhìn ảnh cắt 144 DPI mờ,
+trong khi trọng tài chấm và đường sinh ảnh đều đã được đọc đề; đúng hai ca thua cũ là lỗi
+mà đề nói rõ (*"thiếu đoạn nối P và A"*, *"đồ thị cắt Oy sai dấu tung độ"*);
+(2) bỏ một `Promise.race` bọc quanh lớp gọi Gemini — hạn ngoài 120 s bằng đúng hạn mỗi lượt
+bên trong, nên **vòng dự phòng model chưa bao giờ chạy được** cho hình, và `Promise.race`
+lại không huỷ được yêu cầu nên lượt bị bỏ rơi vẫn tốn hạn mức. Bằng chứng: một hình mất
+**đúng 120 000 ms** rồi báo "dựng hỏng" — nó hết giờ, không phải sinh mã sai;
+(3) hình xử lý **song song** thay vì nối đuôi, hiệu suất đo được **1,94/2 = 97%**.
+Tổng thời gian dựng hình: **493 s → 452 s**, dù khối lượng việc thật tăng gần gấp đôi
+(vòng dự phòng nay chạy thật thay vì bị cắt ngang).
+
 **Hình TikZ giờ có bộ kiểm dựng THẬT, và nó tìm ra bốn thứ sai.** Trước bản này không ai
 biết một bảng biến thiên có tiệm cận đứng hay một hình chóp có nét đứt đúng chỗ có dựng ra
 được không — cho tới lúc chạy đề thật. Nay có 47 hình của chương trình THPT chia bốn họ
@@ -82,6 +96,23 @@ công tắc mà không có giá trị mặc định — mục lưu trước khi 
 `undefined`, và ô tích chết cứng mà không hiện disabled; thêm công tắc thứ sáu ở bản này là
 tạo ra đúng dân số đó trên đĩa của mọi người. Prompt soi hình gửi lặp **ba** khối luật
 chung trong một lượt gọi, nay chọn đúng một khối theo loại hình.
+
+**Sửa tám lỗi tìm ra khi soát lại toàn bộ thay đổi.** Ba cái đáng kể, cả ba đều IM LẶNG:
+phép so nhãn của trọng tài chấm ảnh AI chuẩn hoá một bên mà không chuẩn hoá bên kia, nên
+`"$A$"` không bao giờ khớp `"a"` — cửa chấm biến thành cửa luôn-từ-chối; cửa cỡ tối thiểu đo
+cạnh NGẮN trong khi ảnh đã được kẹp cạnh DÀI, nên mọi hình dẹt bị loại oan; và mục lịch sử
+lưu trước 1.3 khôi phục `wordOptions` không có mặc định, làm ô tích Số trang chết cứng —
+đúng lớp lỗi đã sửa cho công tắc mà quên áp sang trường mới của chính bản này.
+
+**Model đánh trùng id hình thì không còn nuốt mất hình.** Đo thật: một hình ở trang 3 nhận
+id `p1_f1`, trùng id hình trang 1. Trùng id tệ hơn mất hình — bản cắt sau ghi đè bản trước
+rồi hai câu khác nhau cùng trỏ vào một ảnh, mà QC không thấy gì vì id nào cũng có dữ liệu.
+Nay id bị ép về đúng trang và tham chiếu trong nội dung được sửa theo.
+
+**Chuỗi model**: sinh ảnh ưu tiên `gemini-3-pro-image` → `gemini-3.1-flash-image` →
+`gemini-2.5-flash-image`; đọc-hiểu giữ `gemini-3.1-pro` → `3.6-flash`. Mọi tên đều đã đối
+chiếu `models.list()` chứ không đặt theo tên nghe hợp lý — `gemini-3.1-pro` hiện CHƯA phát
+hành nên nằm sẵn ở bậc 1 và bị lọc ra cho tới ngày có thật.
 
 Bộ kiểm: `npm run verify` từ 12 lên **15 harness**, `verify:ci` từ 6 lên **9**. 25 đề golden vẫn
 trùng `document.xml` từng ký tự qua toàn bộ thay đổi trên.

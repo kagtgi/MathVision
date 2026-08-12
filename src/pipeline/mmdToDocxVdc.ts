@@ -186,7 +186,22 @@ export function mmdToVdcChildren(
         break;
 
       case 'image': {
-        const p = makeImageParagraph(b.ref, resolveFigure, BODY_SPACING);
+        // Hình trong khối ĐỀ phải TÔ NỀN cùng khối. Bản trước không tô, mà `image` cũng không
+        // reset `inStem`, nên nền C5E0B3 bị chẻ thành hai dải xanh với một khe TRẮNG ở giữa —
+        // xảy ra với cả 6 hình của 25 đề golden khi chọn định dạng này, và `verify-vdc` chỉ có
+        // một assert `w:fill="C5E0B3"` nên không thấy.
+        // ĐO trên 6 file mẫu VDC (K11_Tuan1-2, K12_Tuan1-4): 29/29 đoạn ảnh nằm giữa hai đoạn
+        // đã tô thì ĐỀU có nền. Không đoán, không suy từ phần chữ của document.xml.
+        // Hình trong LỜI GIẢI thì thụt theo cột lời giải và không tô, giống chữ quanh nó.
+        const p = b.inSolution
+          ? makeImageParagraph(b.ref, resolveFigure, {
+              spacing: { ...SOL_SPACING, before: 80, after: 80 },
+              indent: SOL_INDENT,
+            })
+          : makeImageParagraph(b.ref, resolveFigure, {
+              spacing: BODY_SPACING,
+              ...(inStem ? { shading: STEM_SHADING } : {}),
+            });
         if (p) children.push(p);
         else {
           const runs = lineToRuns(b.line);

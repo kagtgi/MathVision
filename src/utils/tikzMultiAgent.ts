@@ -157,9 +157,24 @@ function extractReasoning(text: string): string {
 /**
  * Đi qua wrapper chung: có chuỗi model dự phòng, backoff theo retryDelay của Google,
  * và huỷ thật khi người dùng bấm dừng.
+ *
+ * `models` và `signal` BẮT BUỘC phải chuyền tiếp. Bản trước bỏ cả hai, nên 2-3 lượt gọi mỗi
+ * hình luôn bắt đầu ở model bậc 1 dù `checkApiKey` đã lọc ra là tài khoản không có nó, và vẫn
+ * đốt hạn mức sau khi người dùng bấm Dừng.
  */
-function callModel(apiKey: string, parts: GeminiPart[], temperature: number) {
-  return callGemini(apiKey, { parts, temperature, label: 'tikz' });
+function callModel(
+  apiKey: string,
+  parts: GeminiPart[],
+  temperature: number,
+  o?: { models?: string[]; signal?: AbortSignal },
+) {
+  return callGemini(apiKey, {
+    parts,
+    temperature,
+    label: 'tikz',
+    models: o?.models,
+    signal: o?.signal,
+  });
 }
 
 // ─── Pipeline ────────────────────────────────────────────────────────────────
@@ -174,9 +189,18 @@ export async function generateTikzMultiAgent(
   apiKey: string,
   imageBase64: string,
   mimeType: string,
-  options?: { onProgress?: TikzProgressCallback; draftA?: string; kind?: FigureCategory },
+  options?: {
+    onProgress?: TikzProgressCallback;
+    draftA?: string;
+    kind?: FigureCategory;
+    /** Chuỗi model đã lọc theo tài khoản. Thiếu là mọi lượt gọi bắt đầu ở model có thể không có. */
+    models?: string[];
+    /** Thiếu là bấm Dừng rồi vẫn đốt hạn mức. */
+    signal?: AbortSignal;
+  },
 ): Promise<TikzGenerationResult> {
   const { onProgress, draftA } = options ?? {};
+  const net = { models: options?.models, signal: options?.signal };
   // `ve` = hình vẽ chưa rõ loại; luật chung, đúng như hành vi trước 1.2.0.
   const kind: FigureCategory = options?.kind ?? 've';
   const img = { inlineData: { data: imageBase64, mimeType } };
@@ -195,7 +219,7 @@ export async function generateTikzMultiAgent(
 
     try {
       const respB = await withTimeout(
-        callModel(apiKey, [{ text: draftPrompt(kind) }, img], TEMP_CREATIVE),
+        callModel(apiKey, [{ text: draftPrompt(kind) }, img], TEMP_CREATIVE, net),
         AGENT_TIMEOUT_MS,
         'DraftB',
       );
@@ -214,7 +238,7 @@ export async function generateTikzMultiAgent(
     log.push('Step 1: Running two independent drafts in parallel...');
 
     const callA = withTimeout(
-      callModel(apiKey, [{ text: draftPrompt(kind) }, img], TEMP_STANDARD),
+      callModel(apiKey, [{ text: draftPrompt(kind) }, img], TEMP_STANDARD, net),
       AGENT_TIMEOUT_MS,
       'DraftA',
     );
@@ -268,6 +292,7 @@ export async function generateTikzMultiAgent(
         { text: `${draftText}\n\nVerify and produce the final code.` },
       ],
       TEMP_PRECISE,
+      net,
     ),
     AGENT_TIMEOUT_MS,
     'Verifier',

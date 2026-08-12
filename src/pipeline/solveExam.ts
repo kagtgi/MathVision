@@ -18,6 +18,12 @@ import {
   type PartType,
 } from './examTransforms.ts';
 import { figureCheckPrompt, solvePrompt, solveSchema, type QType } from './solvePrompts.ts';
+import {
+  figureBriefFor,
+  figureNeedFor,
+  type FigureNeedVerdict,
+} from './figurePolicy.ts';
+import { figureRulesFor, type FigureCategory } from '../utils/figurePrompts.ts';
 import { tikzCapsRules } from '../utils/tikzCapabilities.ts';
 
 export interface QuestionRef {
@@ -195,6 +201,12 @@ async function solveOnce(
   parts.push({ text: `CÂU HỎI:\n${ref.text}` });
   if (!opts.drawFigures) {
     parts.push({ text: 'Lần này KHÔNG vẽ hình: luôn trả veHinh = false, tikz để rỗng.' });
+  } else {
+    // Chỉ dẫn theo TỪNG CÂU. Luật chung trong `solvePrompt` nói "loại bài nào thì vẽ", còn
+    // dòng này nói "CÂU NÀY thì vẽ" — và khi đề đã có hình thì nói rõ hình của lời giải phải
+    // vẽ thêm gì. Ngắn có chủ ý: khối luật vẽ đầy đủ nằm ở bước soi lại.
+    const brief = figureBriefFor(figureNeedFor(ref));
+    if (brief) parts.push({ text: brief });
   }
 
   const res = await callGemini(opts.apiKey, {
@@ -261,10 +273,56 @@ async function rewriteBrokenTikz(
   }
 }
 
+/**
+ * Xin RIÊNG mã hình cho một câu mà chính sách nói bắt buộc phải có hình.
+ *
+ * Vì sao cần một lượt gọi riêng thay vì sửa prompt cho chặt hơn: lượt giải đã xong và đã trả
+ * `veHinh = false`, không có cách nào bắt nó nghĩ lại trong cùng một lượt. Lượt này chỉ hỏi
+ * hình nên prompt gọn, mang được luật vẽ ĐẦY ĐỦ của đúng loại hình cần vẽ, và không có nguy cơ
+ * làm đổi đáp án đã chốt.
+ */
+async function requestFigureOnly(
+  ref: QuestionRef,
+  need: FigureNeedVerdict,
+  opts: SolveOptions,
+): Promise<string | null> {
+  try {
+    const res = await callGemini(opts.apiKey, {
+      parts: [
+        {
+          text: [
+            'Vẽ hình minh hoạ cho câu hỏi dưới đây. CHỈ trả mã TikZ, không giải bài.',
+            '',
+            'CÂU HỎI:',
+            ref.text,
+            '',
+            figureBriefFor(need) ?? '',
+            '',
+            figureRulesFor(need.kind ?? 'khonggian'),
+            '',
+            'Chỉ trả mã TikZ, bắt đầu bằng \\begin{tikzpicture}, không kèm lời dẫn.',
+          ].join('\n'),
+        },
+      ],
+      temperature: 0.1,
+      maxOutputTokens: 4096,
+      signal: opts.signal,
+      models: opts.models,
+      label: `xin hình câu ${ref.num ?? ref.index + 1}`,
+      onLog: opts.onLog,
+    });
+    const code = extractTikz(res.text);
+    return code && code.includes('\\begin{tikzpicture}') ? code : null;
+  } catch {
+    return null;
+  }
+}
+
 async function buildFigure(
   ref: QuestionRef,
   tikz: string,
   opts: SolveOptions,
+  kind: FigureCategory = 'khonggian',
 ): Promise<{ id: string; entry: { bytes: Uint8Array; w: number; h: number } } | null> {
   if (!opts.renderTikz) return null;
   const id = `sol_c${ref.index + 1}_f1`;
@@ -298,7 +356,7 @@ async function buildFigure(
     try {
       const check = await callGemini(opts.apiKey, {
         parts: [
-          { text: figureCheckPrompt(ref.text) },
+          { text: figureCheckPrompt(ref.text, kind) },
           { inlineData: { data: bytesToBase64(png.bytes), mimeType: 'image/png' } },
         ],
         temperature: 0.1,
@@ -335,12 +393,25 @@ export interface SolveResult {
   /** Hình solver tự dựng, để nhập vào figureMap chung. */
   newFigures: Map<string, { bytes: Uint8Array; w: number; h: number }>;
   disagreements: string[];
+  /**
+   * Câu mà chính sách nói BẮT BUỘC có hình nhưng cuối cùng không có. Phải đi lên notes và QC:
+   * lời giải thiếu hình mà im lặng còn tệ hơn không ép vẽ.
+   */
+  figureMisses: string[];
 }
+
+/**
+ * Trần số lượt gọi lại chỉ-để-xin-hình cho MỘT đề. Một đề 40 câu hình học mà thiếu trần này là
+ * 40 lượt gọi thêm.
+ */
+const MAX_FORCED_FIGURES = 12;
 
 export async function solveExam(examMmd: string, opts: SolveOptions): Promise<SolveResult> {
   const refs = splitForSolving(examMmd);
   const newFigures = new Map<string, { bytes: Uint8Array; w: number; h: number }>();
   const disagreements: string[] = [];
+  const figureMisses: string[] = [];
+  let forcedLeft = MAX_FORCED_FIGURES;
   let done = 0;
 
   const results = await runAdaptivePool(
@@ -372,13 +443,56 @@ export async function solveExam(examMmd: string, opts: SolveOptions): Promise<So
         }
       }
 
+      // ── Hình cho lời giải ──
+      //
+      // Bản trước để MODEL quyết một mình (`chosen.veHinh`), code chỉ có một công tắc và một
+      // phép sniff chuỗi. Giờ `figurePolicy` chốt trước ở code: câu nào BẮT BUỘC có hình mà
+      // model vẫn không vẽ thì gọi lại ĐÚNG MỘT lượt chỉ để xin hình. Không có bước này thì
+      // luật prompt mới chỉ là lời khuyên.
+      const need = opts.drawFigures ? figureNeedFor(ref) : null;
       let figureId: string | null = null;
-      if (chosen?.veHinh && opts.drawFigures && chosen.tikz?.includes('\\begin{tikzpicture}')) {
-        const built = await buildFigure(ref, chosen.tikz, opts);
-        if (built) {
-          newFigures.set(built.id, built.entry);
-          figureId = built.id;
+      let figureMiss: string | null = null;
+
+      if (opts.drawFigures && need) {
+        let tikz = chosen?.veHinh ? (chosen.tikz ?? '') : '';
+
+        // `renderTikz` là bắt buộc để xin thêm hình: môi trường không có DOM (harness Node,
+        // `run-real-exam.mjs`) không dựng được TikZ, nên xin mã về cũng chỉ để vứt đi — mà mỗi
+        // lần xin là một lượt gọi API.
+        if (
+          !tikz.includes('\\begin{tikzpicture}') &&
+          need.need === 'bat-buoc' &&
+          forcedLeft > 0 &&
+          opts.apiKey &&
+          opts.renderTikz
+        ) {
+          forcedLeft--;
+          opts.onLog?.(
+            `[hình câu ${ref.num ?? ref.index + 1}] cần hình (${need.why}) mà lời giải không vẽ — xin riêng hình.`,
+          );
+          tikz = (await requestFigureOnly(ref, need, opts)) ?? '';
         }
+
+        if (tikz.includes('\\begin{tikzpicture}')) {
+          const built = await buildFigure(ref, tikz, opts, need.kind ?? 'khonggian');
+          if (built) {
+            newFigures.set(built.id, built.entry);
+            figureId = built.id;
+          } else if (need.need === 'bat-buoc') {
+            figureMiss = 'dựng TikZ không được';
+          }
+        } else if (need.need === 'bat-buoc' && opts.renderTikz) {
+          // Không có `renderTikz` thì cả môi trường vốn không vẽ hình, báo thiếu là báo oan.
+          figureMiss = 'không xin được mã hình';
+        }
+      }
+
+      if (figureMiss) {
+        // Bản trước chỉ `onLog` rồi im — `figureReason` ghi vào SolvedQuestion mà không ai đọc.
+        // Ép vẽ nhiều hơn mà vẫn im lặng thì chỉ tạo ra nhiều lời giải thiếu hình không ai biết.
+        figureMisses.push(
+          `Câu ${ref.num ?? ref.index + 1}: cần hình minh hoạ (${need?.why ?? ''}) nhưng ${figureMiss} — lời giải thiếu hình.`,
+        );
       }
 
       done++;
@@ -416,7 +530,7 @@ export async function solveExam(examMmd: string, opts: SolveOptions): Promise<So
         },
   );
 
-  return { solved, newFigures, disagreements };
+  return { solved, newFigures, disagreements, figureMisses };
 }
 
 // ─── Ráp thành MMD cho đường ống cũ ──────────────────────────────────────────

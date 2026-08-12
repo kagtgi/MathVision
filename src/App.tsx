@@ -22,7 +22,7 @@ import SettingsPanel from './components/SettingsPanel';
 import HistoryPanel from './components/HistoryPanel';
 import { historyAvailable, load as loadHistory, type RestoredConversion } from './history/store';
 import { clearKey, loadKey, saveKey } from './key/keyStore';
-import { checkApiKey, MODEL_CHAIN } from './pipeline/geminiClient';
+import { checkApiKey, IMAGE_MODEL_CHAIN, MODEL_CHAIN } from './pipeline/geminiClient';
 
 type AppMode = 'image-to-word' | 'pdf-to-word';
 
@@ -34,6 +34,13 @@ export default function App() {
   const [checking, setChecking] = useState(false);
   const [keyError, setKeyError] = useState<string | null>(null);
   const [models, setModels] = useState<string[]>(MODEL_CHAIN);
+  /**
+   * Chuỗi model SINH ẢNH. Cố tình KHÔNG lưu vào `secrets.json` như `models`: mở app lần sau nó
+   * về lại hằng số, và đường 404-bước-model cộng cờ `imageChainDead` đã lo đúng ca "tài khoản
+   * không có model ảnh" mà không cần nhớ qua các lần chạy. Lưu thêm một chuỗi nữa là phải sửa
+   * `keyStore` + `secrets.cjs` + `preload.cjs` cho một lợi ích đã có sẵn.
+   */
+  const [imageModels, setImageModels] = useState<string[]>(IMAGE_MODEL_CHAIN);
   const [mode, setMode] = useState<AppMode>('pdf-to-word');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -95,6 +102,7 @@ export default function App() {
       return;
     }
     setModels(result.chain);
+    setImageModels(result.imageChain);
     // Lưu kèm chuỗi model đã lọc, chỉ khi thật sự dò được danh sách.
     const saved = await saveKey(key, result.available.length ? result.chain : undefined);
     setStorage((s) => ({ ...s, enc: saved.enc }));
@@ -299,6 +307,7 @@ export default function App() {
         <PdfToDocxConverter
           apiKey={apiKey}
           models={models}
+          imageModels={imageModels}
           restore={restore}
           restoreSeq={restoreSeq}
         />

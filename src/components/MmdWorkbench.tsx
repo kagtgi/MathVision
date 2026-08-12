@@ -19,7 +19,8 @@ import {
   ShieldCheck,
 } from 'lucide-react';
 
-import { makeFigureResolver, type FigureMap } from '../pipeline/figures';
+import { makeFigureResolver, type FigureMap, type FigureOutcome } from '../pipeline/figures';
+import FigureReview from './FigureReview';
 import { resolveFont } from '../pipeline/fonts';
 import WordOptions, { type WordOptionsValue } from './WordOptions';
 import { buildExamDocx } from '../pipeline/mmdToDocx';
@@ -37,6 +38,8 @@ interface Props {
   issues: QcIssue[];
   notes: string[];
   figures: FigureMap;
+  /** Nguồn của từng hình, cho khung soát. Rỗng khi mở lại từ lịch sử. */
+  figureOutcomes?: FigureOutcome[];
   fileName: string;
   /** Đang chạy pipeline — khoá nút tải để tránh tải bản dở dang. */
   busy?: boolean;
@@ -50,6 +53,7 @@ export default function MmdWorkbench({
   issues,
   notes,
   figures,
+  figureOutcomes,
   fileName,
   busy,
   wordOptions,
@@ -58,9 +62,10 @@ export default function MmdWorkbench({
   const { format } = wordOptions;
   const docxOpts = () => {
     const font = resolveFont(format, wordOptions.fontId);
+    // Chuẩn VDC vốn không có footer nên `pageNumbers` chỉ đi vào đường thường.
     return format === 'vdc'
       ? { font, startNumber: wordOptions.startNumber }
-      : { font };
+      : { font, pageNumbers: wordOptions.pageNumbers };
   };
   const [tab, setTab] = useState<Tab>('preview');
   const [previewError, setPreviewError] = useState<string | null>(null);
@@ -280,6 +285,8 @@ export default function MmdWorkbench({
 
         {tab === 'qc' && (
           <div className="p-6 space-y-6 max-w-[760px]">
+            <FigureReview figures={figures} outcomes={figureOutcomes ?? []} />
+
             {notes.length > 0 && (
               <section>
                 <h3 className="t-label mb-2">Ghi chú xử lý</h3>

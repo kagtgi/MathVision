@@ -12,7 +12,7 @@
 
 import type { FigureMap } from '../pipeline/figures.ts';
 import type { QcIssue } from '../pipeline/qc.ts';
-import type { PipelineToggles } from '../components/OptionToggles.tsx';
+import { normalizeToggles, type PipelineToggles } from '../pipeline/toggles.ts';
 import type { WordOptionsValue } from '../components/WordOptions.tsx';
 import {
   HISTORY_SCHEMA_VERSION,
@@ -191,7 +191,9 @@ export async function load(id: string): Promise<RestoredConversion | null> {
     issues: entry.issues ?? [],
     disagreements: entry.disagreements ?? [],
     wordOptions: entry.wordOptions,
-    toggles: entry.toggles,
+    // KHÔNG được để trần `entry.toggles`: mục cũ thiếu công tắc mới sinh sau nó, và
+    // `OptionToggles` nhận `checked={undefined}` thì ô tích chết cứng. Xem `normalizeToggles`.
+    toggles: normalizeToggles(entry.toggles),
     figures: recordsToFigureMap(entry.figures ?? [], res.figures ?? []),
     figuresOmitted: Boolean(entry.figuresOmitted),
   };

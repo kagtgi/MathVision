@@ -22,6 +22,14 @@ export interface QcOptions {
   figureIds?: Set<string>;
   /** Số câu solver đánh dấu là "2 lượt lệch nhau". */
   disagreements?: string[];
+  /**
+   * Câu mà `figurePolicy` nói BẮT BUỘC có hình nhưng cuối cùng không có (đã kèm số câu và lý do).
+   *
+   * Vì sao là một quy tắc riêng: mọi quy tắc ảnh khác ở đây kiểm ảnh **treo id** (có dòng
+   * `![](#x)` mà không có dữ liệu). Không có quy tắc nào kiểm ảnh **THIẾU** — mà lời giải hình
+   * học không có hình thì trông y như lời giải không cần hình.
+   */
+  figureMisses?: string[];
 }
 
 const VN_DIACRITICS =
@@ -177,6 +185,9 @@ export function qcMmd(raw: string, opts: QcOptions = {}): QcIssue[] {
   for (const q of opts.disagreements ?? []) {
     add('warn', `${q}: hai lượt giải cho kết quả khác nhau — cần kiểm tra`);
   }
+
+  // 12. Lời giải thiếu hình minh hoạ mà chính sách nói bắt buộc phải có
+  for (const m of opts.figureMisses ?? []) add('warn', m);
 
   return issues;
 }

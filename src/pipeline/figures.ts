@@ -9,7 +9,14 @@
 import type { FigureData } from './mmdToDocx.ts';
 import { pngSize } from './mmdToDocx.ts';
 
-export type FigureSource = 'crop' | 'tikz';
+/**
+ * `genai` = model sinh ảnh dựng lại, đã qua tiền kiểm pixel + trọng tài.
+ *
+ * KHÔNG bump `HISTORY_SCHEMA_VERSION` khi mở rộng union này: không nơi nào đọc số phiên bản đó
+ * làm cửa (`electron/history.cjs` chỉ `payload.schema ?? 1`), và app bản cũ mở mục mới vẫn xuất
+ * .docx y hệt vì `makeImageParagraph` chỉ đọc `bytes`/`w`/`h`.
+ */
+export type FigureSource = 'crop' | 'tikz' | 'genai';
 
 export interface FigureEntry extends FigureData {
   source: FigureSource;
@@ -76,6 +83,60 @@ export function figureDataUrl(fig: FigureData): string {
   }
   return `data:image/png;base64,${btoa(binary)}`;
 }
+
+/**
+ * Kết quả xử lý MỘT hình — đủ để dựng cảnh báo và nhật ký mà không phải đoán lại.
+ *
+ * Thay cho `boolean` mà `redrawOne` từng trả: `false` không phân biệt được "TikZ sai" với "chưa
+ * bật sinh ảnh" với "loại hình này không cho sinh", nên cảnh báo nào cũng phải nói chung chung.
+ */
+export interface FigureOutcome {
+  id: string;
+  /** Bản THẬT SỰ nằm trong figureMap khi xong. */
+  used: FigureSource;
+  /** Từng bước đã thử, theo thứ tự. */
+  tried: Array<{ step: 'tikz' | 'genai'; ok: boolean; why: string }>;
+  /** Có ngữ cảnh đề khi sinh ảnh hay không — đổi câu chữ của cảnh báo. */
+  hadContext: boolean;
+  /** Số câu chứa hình, nếu tra được. */
+  num: number | null;
+}
+
+/**
+ * Cảnh báo cho tab Kiểm tra. Thuần để harness chốt được từng câu chữ.
+ *
+ * Hình `tikz` KHÔNG sinh cảnh báo (y như 1.2). Hình `genai` thì LUÔN sinh: ảnh AI là rủi ro về
+ * NỘI DUNG theo cách mà một hình TikZ không phải — TikZ ít nhất còn là mã người đọc soát được.
+ */
+export function warnFor(o: FigureOutcome): string[] {
+  const cau = o.num !== null ? ` (câu ${o.num})` : '';
+  const last = o.tried.filter((t) => !t.ok).slice(-1)[0]?.why ?? '';
+
+  if (o.used === 'tikz') return [];
+  if (o.used === 'genai') {
+    return o.hadContext
+      ? [
+          `Hình ${o.id}${cau} là ảnh do AI SINH, không phải hình trong đề gốc — PHẢI xem lại trước khi in.`,
+        ]
+      : [
+          `Hình ${o.id}${cau}: AI dựng lại CHỈ TỪ ảnh cắt (không tìm được đề bài quanh hình) — cần xem lại kỹ.`,
+        ];
+  }
+
+  const gen = o.tried.find((t) => t.step === 'genai');
+  if (!gen) {
+    // Chuỗi này phải GIỮ NGUYÊN từng byte so với 1.2: harness chốt nó để bản mới không âm thầm
+    // đổi câu chữ mà người dùng đã quen.
+    return [`Hình ${o.id}: dựng TikZ không đạt — dùng ảnh cắt từ đề.`];
+  }
+  if (gen.why === KIND_NOT_ALLOWED) {
+    return [`Hình ${o.id}: dựng TikZ không đạt — loại hình này chỉ dùng TikZ, giữ ảnh cắt từ đề.`];
+  }
+  return [`Hình ${o.id}: cả TikZ lẫn ảnh AI đều không đạt — dùng ảnh cắt từ đề (${last}).`];
+}
+
+/** Lý do cố định, để `warnFor` nhận ra ca "loại hình không cho sinh ảnh". */
+export const KIND_NOT_ALLOWED = 'loại hình chỉ dùng TikZ';
 
 /** Resolver cho mmdToDocx: chấp nhận cả `#id` lẫn `id`. */
 export function makeFigureResolver(map: FigureMap) {

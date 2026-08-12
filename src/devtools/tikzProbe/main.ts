@@ -11,6 +11,7 @@
  */
 
 import { preprocessTikzForTikzJax } from '../../utils/latexToImage';
+import { MIN_INK_RATIO } from '../../utils/tikzCapabilities';
 import { CASES, type ProbeCase } from './cases';
 
 const TIMEOUT_MS = 12_000;
@@ -28,7 +29,14 @@ interface ProbeResult {
   ms: number;
   w: number;
   h: number;
-  /** % pixel không phải trắng. Hình rỗng vẫn ra SVG nên đây là phép đo thật sự. */
+  /**
+   * RATIO pixel không phải trắng (KHÔNG phải phần trăm). Hình rỗng vẫn ra SVG nên đây là phép
+   * đo thật sự.
+   *
+   * Bản trước lưu phần trăm rồi lại chốt đạt bằng `ink > 0.02`, tức ngưỡng thật 0,0002 —
+   * LỎNG GẤP 10 LẦN `MIN_INK_RATIO` của app. Hệ quả: ca probe báo "dựng được" ở 0,05% mực là
+   * ca mà `tikzToImage` thật sự BỎ HÌNH. Giờ dùng chung một ngưỡng, một đơn vị.
+   */
   ink: number;
   textNodes: number;
   pathNodes: number;
@@ -132,7 +140,7 @@ async function runCase(c: ProbeCase): Promise<ProbeResult> {
         ctx.fillStyle = '#fff';
         ctx.fillRect(0, 0, w, h);
         ctx.drawImage(img, 0, 0, w, h);
-        base.ink = Math.round(inkRatio(canvas) * 100000) / 1000;
+        base.ink = inkRatio(canvas);
         base.png = canvas.toDataURL('image/png');
         URL.revokeObjectURL(url);
         resolve();
@@ -143,7 +151,8 @@ async function runCase(c: ProbeCase): Promise<ProbeResult> {
 
     // Ra được SVG nhưng không có mực nào thì coi là KHÔNG dựng được — đúng cái bẫy
     // MIN_TIKZ_DIMENSION đang che: hình rỗng thành PNG trắng 200x200 hợp lệ.
-    base.ok = base.ink > 0.02;
+    // Dùng ĐÚNG ngưỡng của app: probe không được rộng rãi hơn thứ nó đang dự báo.
+    base.ok = base.ink >= MIN_INK_RATIO;
     base.asExpected = expect === 'ok' ? base.ok : !base.ok;
     cleanup();
     return base;
@@ -170,7 +179,7 @@ function render(done: number) {
       return `<tr class="${r.asExpected ? '' : 'bad'}">
         <td>${mark}</td><td><code>${r.id}</code>${r.raw ? ' <em>raw</em>' : ''}${note}</td>
         <td>${r.ok ? 'dựng được' : '<b>không dựng được</b>'}</td>
-        <td>${r.ms}</td><td>${r.w}×${r.h}</td><td>${r.ink}%</td>
+        <td>${r.ms}</td><td>${r.w}×${r.h}</td><td>${(r.ink * 100).toFixed(3)}%</td>
         <td>${r.textNodes}</td><td>${r.pathNodes}</td>
         <td>${r.fonts.join(', ') || '—'}</td>
         <td>${r.png ? `<img src="${r.png}" />` : ''}</td>

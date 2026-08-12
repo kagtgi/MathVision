@@ -12,8 +12,11 @@
 import process from 'node:process';
 
 import { splitForSolving, renderSolutionsMmd } from '../src/pipeline/solveExam.ts';
+import { parseMmdBlocks } from '../src/pipeline/mmdBlocks.ts';
+import { default as JSZip } from 'jszip';
+import { makePng } from './lib/png.mjs';
 import { conformMmd } from '../src/pipeline/conform.ts';
-import { applyExamTransforms } from '../src/pipeline/examTransforms.ts';
+import { applyExamTransforms, asHeading, typeFromBody } from '../src/pipeline/examTransforms.ts';
 import { qcMmd } from '../src/pipeline/qc.ts';
 import { buildExamDocx } from '../src/pipeline/mmdToDocx.ts';
 import { Packer } from 'docx';
@@ -193,10 +196,212 @@ console.log(
   `${noStrayChon ? GREEN('PASS') : RED('FAIL')}  không sinh "Chọn ?." cho câu tự luận`,
 );
 
+// ─── Trình bày hình: trong ĐỀ khác trong LỜI GIẢI ────────────────────────────
+//
+// Hinh trong loi giai la duong MOI cua 1.3 (solver tu ve hinh minh hoa cho loi giai), va
+// 25 de golden khong co ca nao — 12/12 dong anh cua chung deu o khoi de. Nen khong harness
+// nao phu cho vi tri nay, phai chot o day.
+
+const FIG_MMD = `Câu 1. Cho hình chóp $S.ABCD$.
+
+![](#de_f1)
+
+A. 1.
+B. 2.
+C. 3.
+D. 4.
+
+# ĐÁP ÁN CHI TIẾT
+
+Câu 1. Cho hình chóp $S.ABCD$.
+
+![](#de_f1)
+
+__B.__ 2.
+
+Lời giải
+
+Chọn B.
+
+![](#sol_c1_f1)
+
+Ta có kết quả cần tìm.
+`;
+
+const figs = new Map([
+  ['de_f1', { bytes: makePng(400, 300), w: 400, h: 300 }],
+  // Cao ngoẵng có chủ ý: 200×1200 px là ca mà bản trước co theo chiều rộng KHÔNG chạm tới,
+  // cho ra 3,97 × 23,81 cm — gần trọn 27,7 cm chiều cao chữ, một hình chiếm cả trang.
+  ['sol_c1_f1', { bytes: makePng(200, 1200), w: 200, h: 1200 }],
+]);
+const figResolver = (ref) => figs.get(String(ref).replace(/^#/, '')) ?? null;
+
+const figBlocks = parseMmdBlocks(FIG_MMD).filter((b) => b.kind === 'image');
+const figZip = await JSZip.loadAsync(
+  await Packer.toBuffer(buildExamDocx(FIG_MMD, figResolver)),
+);
+const figDoc = await figZip.file('word/document.xml').async('string');
+/** Đoạn ảnh, theo thứ tự xuất hiện: đề, đề (in lại), lời giải. */
+const imgParas = [...figDoc.matchAll(/<w:p\b[\s\S]*?<\/w:p>/g)]
+  .map((m) => m[0])
+  .filter((p) => p.includes('<w:drawing>'));
+const extents = [...figDoc.matchAll(/<wp:extent cx="(\d+)" cy="(\d+)"\/>/g)].map((m) => ({
+  w: Number(m[1]) / 9525,
+  h: Number(m[2]) / 9525,
+}));
+
+const figChecks = [
+  ['quét ra 3 dòng ảnh', () => figBlocks.length === 3],
+  ['ảnh trong khối đề: inSolution = false', () => figBlocks.slice(0, 2).every((b) => !b.inSolution)],
+  ['ảnh trong lời giải: inSolution = true', () => figBlocks[2].inSolution === true],
+  ['docx có đúng 3 đoạn ảnh', () => imgParas.length === 3],
+  // Hình đề giữ nguyên bản cũ: indent 0. Đây là thứ giữ cho 25 golden trùng từng byte.
+  ['ảnh đề KHÔNG thụt lề', () => !/<w:ind /.test(imgParas[0])],
+  ['ảnh lời giải thụt 992 (canh giữa theo cột lời giải)', () => /<w:ind w:left="992"/.test(imgParas[2])],
+  ['ảnh lời giải có spacing riêng (before/after 80)', () => /w:before="80"/.test(imgParas[2])],
+  ['trần cao 420: hình 200x1200 bị co', () => extents[2].h <= 420 + 1],
+  ['co đúng tỉ lệ (200x1200 -> 70x420)', () => Math.abs(extents[2].w - 70) <= 1],
+  ['hình đề 400x300 KHÔNG bị co (dưới cả hai trần)', () =>
+    Math.abs(extents[0].w - 300) <= 1 && Math.abs(extents[0].h - 225) <= 1],
+];
+
+// ─── Đề chính thức THPT 2025 ─────────────────────────────────────────────────
+//
+// Ba tieu de duoi day chep NGUYEN VAN tu de chinh thuc 2025 ma 0101. Chay that mot ma de moi
+// phat hien duoc bo dau: PHAN II khong nhan ra vi de viet "chon dung HOAC sai" (regex cu doi
+// "dung-sai" lien), va PHAN III khong co tu khoa loai nao nen ca 6 cau tra loi ngan bi giai
+// thanh tu luan — khong cau nao co dong "Dap so:". Mot luot chay that ton vai phut va vai chuc
+// nghin token, nen phai chot lai o day.
+
+const H2025 = {
+  I: 'PHẦN I. Thí sinh trả lời từ câu 1 đến câu 12. Mỗi câu hỏi thí sinh chỉ chọn một phương án.',
+  II: 'PHẦN II. Thí sinh trả lời từ câu 1 đến 4. Trong mỗi ý a), b), c), d) ở mỗi câu, thí sinh chọn đúng hoặc sai.',
+  III: 'PHẦN III. Thí sinh trả lời từ câu 1 đến câu 6.',
+};
+
+const MMD_2025 = `${H2025.I}
+
+Câu 1: Cho hình lăng trụ $ABC.A'B'C'$. Phát biểu nào sau đây là đúng?
+A. 1.
+B. 2.
+C. 3.
+D. 4.
+
+${H2025.II}
+
+Câu 1: Cho hàm số $f(x) = x^{3} - 12x - 8$.
+a) Hàm số có đạo hàm $f'(x) = 3x^{2} - 12$.
+b) Phương trình $f'(x) = 0$ có tập nghiệm $S = \\{2\\}$.
+
+${H2025.III}
+
+Câu 1: Bạn Nam chọn sáu số từ tập $S$. Giá trị của $\\frac{1}{a}$ bằng bao nhiêu?
+
+Câu 2: Một vật chuyển động. Tính quãng đường (làm tròn đến hàng đơn vị).
+`;
+
+const t2025 = applyExamTransforms(MMD_2025).mmd;
+
+const c2025 = [
+  ['PHẦN I: nhận ra qua "phương án"', () => asHeading(H2025.I)?.type === 'TN'],
+  // "chọn đúng HOẶC sai" — bản trước chỉ khớp "đúng-sai" liền nên trượt.
+  ['PHẦN II: nhận ra "chọn đúng hoặc sai"', () => asHeading(H2025.II)?.type === 'DS'],
+  // Là tiêu đề THẬT nhưng không nói loại: phải trả về heading với type null, KHÔNG phải null.
+  ['PHẦN III: là tiêu đề, nhưng chưa rõ loại', () => {
+    const h = asHeading(H2025.III);
+    return h !== null && h.type === null;
+  }],
+  ['câu hỏi "bằng bao nhiêu" -> TLN', () => typeFromBody(['Giá trị của $x$ bằng bao nhiêu?']) === 'TLN'],
+  ['câu hỏi "làm tròn đến" -> TLN', () => typeFromBody(['Tính quãng đường (làm tròn đến hàng đơn vị).']) === 'TLN'],
+  ['câu tự luận thường vẫn là TL', () => typeFromBody(['Chứng minh rằng $AB \\perp CD$.']) === 'TL'],
+  // Kết quả cuối: cả ba phần phải mang TÊN CHUẨN.
+  ['đặt tên chuẩn cho cả ba phần', () =>
+    /PHẦN I\. CÂU TRẮC NGHIỆM NHIỀU PHƯƠNG ÁN LỰA CHỌN/.test(t2025) &&
+    /PHẦN II\. CÂU TRẮC NGHIỆM ĐÚNG SAI/.test(t2025) &&
+    /PHẦN III\. CÂU TRẮC NGHIỆM TRẢ LỜI NGẮN/.test(t2025)],
+  ['splitForSolving gán đúng loại cho câu của PHẦN III', () => {
+    const refs = splitForSolving(t2025);
+    return refs.filter((r) => r.type === 'TLN').length === 2;
+  }],
+];
+
+console.log('\n=== Đề chính thức THPT 2025 (mã 0101) ===');
+let ok5 = 0;
+for (const [name, fn] of c2025) {
+  let pass = false;
+  try {
+    pass = fn();
+  } catch {
+    pass = false;
+  }
+  if (pass) ok5++;
+  else console.log(`  ${RED('FAIL')} ${name}`);
+}
+console.log(`${ok5 === c2025.length ? GREEN('PASS') : RED('FAIL')}  ${ok5}/${c2025.length} tiêu chí`);
+
+// ─── Công tắc số trang ───────────────────────────────────────────────────────
+
+const zipOf = async (opts) => JSZip.loadAsync(await Packer.toBuffer(buildExamDocx(FIG_MMD, figResolver, opts)));
+const zipOn = await zipOf({});
+const zipOff = await zipOf({ pageNumbers: false });
+const footerFiles = (z) => Object.keys(z.files).filter((f) => /footer\d*\.xml$/.test(f));
+const docOn = await zipOn.file('word/document.xml').async('string');
+const docOff = await zipOff.file('word/document.xml').async('string');
+
+const pageChecks = [
+  // Mặc định BẬT là thứ giữ cho 25 đề golden trùng từng byte — đổi mặc định là vỡ verify-docx.
+  ['mặc định có footer "Trang N"', () => footerFiles(zipOn).length === 1],
+  ['tắt thì BỎ HẲN file footer, không phải footer rỗng', () => footerFiles(zipOff).length === 0],
+  ['tắt thì document.xml không còn tham chiếu footer', () => !/<w:footerReference/.test(docOff)],
+  ['bật thì document.xml CÓ tham chiếu footer', () => /<w:footerReference/.test(docOn)],
+  // Chỉ footer đổi; lề, khổ giấy và toàn bộ nội dung phải y nguyên.
+  ['tắt số trang KHÔNG đụng tới lề trang', () => {
+    const m = (d) => (d.match(/<w:pgMar[^/]*\/>/) ?? [''])[0];
+    return m(docOn) === m(docOff) && m(docOn).includes('w:left="851"');
+  }],
+];
+
+console.log('\n=== Công tắc số trang ===');
+let ok4 = 0;
+for (const [name, fn] of pageChecks) {
+  let pass = false;
+  try {
+    pass = fn();
+  } catch {
+    pass = false;
+  }
+  if (pass) ok4++;
+  else console.log(`  ${RED('FAIL')} ${name}`);
+}
+console.log(`${ok4 === pageChecks.length ? GREEN('PASS') : RED('FAIL')}  ${ok4}/${pageChecks.length} tiêu chí`);
+
+console.log('\n=== Trình bày hình: khối đề vs lời giải ===');
+let ok3 = 0;
+for (const [name, fn] of figChecks) {
+  let pass = false;
+  let why = '';
+  try {
+    pass = fn();
+  } catch (e) {
+    why = e.message;
+  }
+  if (pass) ok3++;
+  else console.log(`  ${RED('FAIL')} ${name}${why ? ` (${why})` : ''}`);
+}
+console.log(`${ok3 === figChecks.length ? GREEN('PASS') : RED('FAIL')}  ${ok3}/${figChecks.length} tiêu chí`);
+
 if (process.argv.includes('--print')) {
   console.log('\n--- MMD cuối ---\n' + final);
   console.log('\n--- MMD đề trộn loại ---\n' + mixedMmd);
 }
 
-const allOk = ok === checks.length && errs.length === 0 && docxOk && ok2 === mixedChecks.length && noStrayChon;
+const allOk =
+  ok === checks.length &&
+  errs.length === 0 &&
+  docxOk &&
+  ok2 === mixedChecks.length &&
+  noStrayChon &&
+  ok3 === figChecks.length &&
+  ok4 === pageChecks.length &&
+  ok5 === c2025.length;
 process.exit(allOk ? 0 : 2);

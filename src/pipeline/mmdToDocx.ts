@@ -170,18 +170,49 @@ export function buildTable(rows: string[][], headerBold = true): Table {
   return new Table({ rows: tableRows, width: { size: 100, type: WidthType.PERCENTAGE } });
 }
 
+/**
+ * Trần RỘNG (docx px, tức px @96dpi vì `docx` nhân 9525 EMU). 340 px = 9,00 cm = đúng 50% cột
+ * chữ A4 sau lề 851 twip mỗi bên.
+ */
+const IMG_MAX_W = 340;
+
+/**
+ * Trần CAO. Bản trước chỉ kẹp chiều rộng, nên một hình cao hẹp (200×1200 px) ra 3,97 × 23,81 cm
+ * — gần trọn 27,7 cm chiều cao chữ, một hình chiếm cả trang.
+ *
+ * 420 px = 11,1 cm, chọn CÓ ĐO: hình cao nhất trong 25 đề golden là 342 px và hình cao nhất
+ * trong bộ 47 hình corpus là 375 px, nên trần này KHÔNG co thêm hình nào đang có ⇒ `document.xml`
+ * không đổi một byte ⇒ `verify-docx` vẫn 25/25 mà không phải sửa oracle (`ref-mmd2docx.cjs` bị
+ * CONTRIBUTING cấm sửa). Nó là guard cho hình dị dạng, không phải phép co cho hình bình thường.
+ */
+const IMG_MAX_H = 420;
+
+export interface ImageParagraphOpts {
+  spacing?: Record<string, unknown>;
+  /** Thụt lề để hình canh giữa theo CỘT LỜI GIẢI, không phải theo cột đầy đủ. */
+  indent?: Record<string, unknown>;
+  /** Nền, chỉ chuẩn VDC dùng. K11 không truyền ⇒ output không đổi. */
+  shading?: Record<string, unknown>;
+}
+
 export function makeImageParagraph(
   ref: string,
   resolveFigure: FigureResolver,
-  spacing: Record<string, unknown> = BODY_SPACING,
+  o: ImageParagraphOpts = {},
 ): Paragraph | null {
   const fig = resolveFigure(ref);
   if (!fig) return null;
-  const maxW = 340;
-  const scale = Math.min(1, maxW / (fig.w * 0.75));
+
+  const scale = Math.min(
+    1,
+    IMG_MAX_W / (fig.w * 0.75),
+    IMG_MAX_H / (fig.h * 0.75),
+  );
   return new Paragraph({
     alignment: AlignmentType.CENTER,
-    spacing,
+    spacing: o.spacing ?? BODY_SPACING,
+    ...(o.indent ? { indent: o.indent } : {}),
+    ...(o.shading ? { shading: o.shading } : {}),
     children: [
       new ImageRun({
         type: 'png', // thiếu `type` -> docx đặt tên media là *.undefined
@@ -224,7 +255,16 @@ export function mmdToDocxChildren(
         break;
 
       case 'image': {
-        const p = makeImageParagraph(b.ref, resolveFigure);
+        // Hình TRONG lời giải canh giữa theo cột lời giải (thụt 992) chứ không theo cột đầy đủ:
+        // để nguyên indent 0 thì hình lệch 0,87 cm so với khối chữ nó minh hoạ. `before` cho nó
+        // rời khỏi dòng "Chọn X." phía trên. Hình trong khối ĐỀ giữ y nguyên bản cũ nên 25 file
+        // golden (12/12 dòng ảnh đều ở khối đề) vẫn trùng từng byte.
+        const p = b.inSolution
+          ? makeImageParagraph(b.ref, resolveFigure, {
+              spacing: { ...SOL_SPACING, before: 80, after: 80 },
+              indent: SOL_INDENT,
+            })
+          : makeImageParagraph(b.ref, resolveFigure);
         // Không tìm được ảnh thì rơi về dòng thường, y như bản gốc.
         if (p) children.push(p);
         else {
@@ -393,6 +433,12 @@ export interface ExamDocxOptions {
    * oracle; phần numbering do `verify-numbering.mjs` che.
    */
   autoNumberCau?: boolean;
+  /**
+   * In footer "Trang N". Mặc định BẬT — đúng file mẫu K11, nên 25 đề golden không đổi một byte.
+   *
+   * Tắt khi đề in ghép vào tài liệu khác, hoặc khi thầy tự đánh số bằng máy in.
+   */
+  pageNumbers?: boolean;
 }
 
 export function buildExamDocx(
@@ -422,19 +468,25 @@ export function buildExamDocx(
             margin: { top: 568, right: 851, bottom: 567, left: 851, header: 284, footer: 0, gutter: 0 },
           },
         },
-        footers: {
-          default: new Footer({
-            children: [
-              new Paragraph({
-                alignment: AlignmentType.CENTER,
-                children: [
-                  new TextRun({ text: 'Trang ', size: 20 }),
-                  new TextRun({ children: [PageNumber.CURRENT], size: 20 }),
-                ],
-              }),
-            ],
-          }),
-        },
+        // Tắt số trang thì BỎ HẲN khối `footers`, không phải đưa vào một footer rỗng: footer
+        // rỗng vẫn sinh `footer1.xml` và vẫn chừa chỗ trắng cuối trang.
+        ...(opts.pageNumbers === false
+          ? {}
+          : {
+              footers: {
+                default: new Footer({
+                  children: [
+                    new Paragraph({
+                      alignment: AlignmentType.CENTER,
+                      children: [
+                        new TextRun({ text: 'Trang ', size: 20 }),
+                        new TextRun({ children: [PageNumber.CURRENT], size: 20 }),
+                      ],
+                    }),
+                  ],
+                }),
+              },
+            }),
         children,
       },
     ],

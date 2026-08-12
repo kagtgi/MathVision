@@ -14,6 +14,11 @@ export interface WordOptionsValue {
   fontId: FontPresetId | null;
   /** Số câu bắt đầu, chỉ dùng cho định dạng VDC. */
   startNumber: number;
+  /**
+   * In footer "Trang N". Chỉ có nghĩa với định dạng thường — chuẩn VDC vốn KHÔNG có footer,
+   * đo từ file mẫu, nên công tắc này không hiện khi chọn VDC.
+   */
+  pageNumbers: boolean;
 }
 
 interface Props {
@@ -89,12 +94,35 @@ export default function WordOptions({ value, onChange, disabled, variant }: Prop
     />
   );
 
+  // Chuẩn VDC không có footer (đo từ file mẫu), nên công tắc chỉ có nghĩa với định dạng thường.
+  const pageNumberToggle = value.format !== 'vdc' && (
+    <label
+      className={`flex items-center gap-2 ${inline ? 'h-[30px] px-2' : ''} ${
+        disabled ? 'opacity-40' : 'cursor-pointer'
+      }`}
+      title='In dòng "Trang N" ở chân mỗi trang'
+    >
+      <input
+        type="checkbox"
+        checked={value.pageNumbers}
+        disabled={disabled}
+        onChange={(e) => onChange({ ...value, pageNumbers: e.target.checked })}
+        className="w-3.5 h-3.5 shrink-0 rounded"
+        style={{ accentColor: 'var(--accent)' }}
+      />
+      <span className="text-[12.5px] whitespace-nowrap" style={{ color: 'var(--ink)' }}>
+        Số trang
+      </span>
+    </label>
+  );
+
   if (inline) {
     return (
       <>
         {formatSelect}
         {fontSelect}
         {startInput}
+        {pageNumberToggle}
       </>
     );
   }
@@ -115,6 +143,7 @@ export default function WordOptions({ value, onChange, disabled, variant }: Prop
           {startInput}
         </div>
       )}
+      {pageNumberToggle}
     </div>
   );
 }
@@ -123,4 +152,6 @@ export const DEFAULT_WORD_OPTIONS: WordOptionsValue = {
   format: 'k11',
   fontId: null,
   startNumber: 1,
+  // Mặc định BẬT: đúng file mẫu K11, nên 25 đề golden vẫn trùng từng byte.
+  pageNumbers: true,
 };

@@ -20,7 +20,6 @@
 
 import crypto from 'node:crypto';
 import process from 'node:process';
-import zlib from 'node:zlib';
 
 import JSZip from 'jszip';
 import { Packer } from 'docx';
@@ -40,47 +39,9 @@ import {
 const GREEN = (s) => `\x1b[32m${s}\x1b[0m`;
 const RED = (s) => `\x1b[31m${s}\x1b[0m`;
 
-// ─── Dựng PNG thật (đủ hợp lệ để pngSize đọc IHDR và Word mở được) ────────────
-
-function crc32(buf) {
-  let c = ~0;
-  for (let i = 0; i < buf.length; i++) {
-    c ^= buf[i];
-    for (let k = 0; k < 8; k++) c = (c >>> 1) ^ (0xedb88320 & -(c & 1));
-  }
-  return ~c >>> 0;
-}
-
-function chunk(type, data) {
-  const len = Buffer.alloc(4);
-  len.writeUInt32BE(data.length);
-  const body = Buffer.concat([Buffer.from(type, 'ascii'), data]);
-  const crc = Buffer.alloc(4);
-  crc.writeUInt32BE(crc32(body));
-  return Buffer.concat([len, body, crc]);
-}
-
-/** PNG xám wxh, mỗi hàng một byte filter + w byte pixel. `seed` để hai hình khác bytes. */
-function makePng(w, h, seed) {
-  const ihdr = Buffer.alloc(13);
-  ihdr.writeUInt32BE(w, 0);
-  ihdr.writeUInt32BE(h, 4);
-  ihdr[8] = 8; // bit depth
-  ihdr[9] = 0; // grayscale
-  const raw = Buffer.alloc((w + 1) * h);
-  for (let y = 0; y < h; y++) {
-    raw[y * (w + 1)] = 0;
-    for (let x = 0; x < w; x++) raw[y * (w + 1) + 1 + x] = (x * 7 + y * 13 + seed * 31) & 0xff;
-  }
-  return new Uint8Array(
-    Buffer.concat([
-      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
-      chunk('IHDR', ihdr),
-      chunk('IDAT', zlib.deflateSync(raw)),
-      chunk('IEND', Buffer.alloc(0)),
-    ]),
-  );
-}
+// PNG fixture dùng chung ba harness — xem `scripts/lib/png.mjs`.
+const { makePng } = await import('./lib/png.mjs');
+const { DEFAULT_TOGGLES, normalizeToggles } = await import('../src/pipeline/toggles.ts');
 
 const sha = (u8) => crypto.createHash('sha256').update(u8).digest('hex');
 
@@ -98,7 +59,9 @@ const BAD_ID = '../evil';
 
 const sourceMap = new Map([
   ['p1_f1', { bytes: figA, w: 40, h: 30, source: 'crop' }],
-  ['p2_f1', { bytes: figB, w: 24, h: 24, source: 'crop' }],
+  // `genai` là giá trị thứ ba của `FigureSource`, thêm ở 1.3. Round-trip nó ở đây để việc mở
+  // rộng union không âm thầm làm mất nhãn nguồn khi mở lại mục lịch sử.
+  ['p2_f1', { bytes: figB, w: 24, h: 24, source: 'genai' }],
   [BAD_ID, { bytes: figC, w: 60, h: 20, source: 'tikz' }],
 ]);
 
@@ -182,6 +145,8 @@ const manifest = JSON.parse(
     issues: ISSUES,
     disagreements: DISAGREEMENTS,
     wordOptions: { format: 'k11', fontId: null, startNumber: 1 },
+    // CỐ Ý thiếu `genFigureImage`: đây là hình dạng của mọi mục lưu TRƯỚC 1.3, và là dân số mà
+    // `normalizeToggles` phải vá. Xem nhóm kiểm ở cuối file.
     toggles: { examMode: true, autoSolve: true, doubleCheck: true, drawFigures: true, redrawTikz: true },
     figures: records,
     figuresOmitted: false,
@@ -264,6 +229,41 @@ push('excerpt không quá 160 ký tự', preview.excerpt.length <= 160, String(p
 push('searchText đã hạ chữ thường và có tên file', preview.searchText.includes('de-thi-01.pdf') && preview.searchText === preview.searchText.toLowerCase());
 push('excerpt cắt dài thì có dấu …', plainExcerpt('x'.repeat(400)).endsWith('…'));
 push('totalFigureBytes đếm đúng', totalFigureBytes(sourceMap) === figA.length + figB.length + figC.length);
+
+// ─── Vá công tắc của mục lịch sử cũ ──────────────────────────────────────────
+//
+// Đây là guard tự động DUY NHẤT cho lớp bug `store.ts` khôi phục `toggles` mà không có default:
+// mục lưu trước khi một công tắc ra đời cho `undefined`, rồi `OptionToggles` truyền
+// `checked={undefined}` vào input — React đổi input sang controlled và ô tích CHẾT CỨNG mà không
+// hiện disabled. `load()` cần cầu nối Electron nên chỉ kiểm được qua hàm thuần này.
+
+const allBool = (t) => Object.values(t).every((v) => typeof v === 'boolean');
+const keysOf = (t) => Object.keys(t).sort().join(',');
+
+push(
+  'vá được manifest thiếu công tắc mới (đúng ca của mọi mục lưu trước 1.3)',
+  (() => {
+    const t = normalizeToggles(manifest.toggles);
+    return allBool(t) && t.genFigureImage === DEFAULT_TOGGLES.genFigureImage;
+  })(),
+);
+push('vá được toggles undefined', allBool(normalizeToggles(undefined)));
+push('vá được toggles null', allBool(normalizeToggles(null)));
+push(
+  'giá trị không phải boolean thì rơi về mặc định, không lọt ra ngoài',
+  (() => {
+    const t = normalizeToggles({ examMode: 'yes', autoSolve: 0, redrawTikz: false });
+    return allBool(t) && t.examMode === true && t.autoSolve === true && t.redrawTikz === false;
+  })(),
+);
+push(
+  'luôn trả ĐỦ mọi khoá của DEFAULT_TOGGLES',
+  keysOf(normalizeToggles({})) === keysOf(DEFAULT_TOGGLES),
+);
+push(
+  'giữ nguyên lựa chọn thật của người dùng',
+  normalizeToggles({ ...DEFAULT_TOGGLES, doubleCheck: false }).doubleCheck === false,
+);
 
 // ─── Kết ─────────────────────────────────────────────────────────────────────
 

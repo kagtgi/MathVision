@@ -23,6 +23,15 @@ export const MODEL_CHAIN = [
   'gemini-flash-latest',
 ];
 
+/**
+ * Chuỗi model SINH ẢNH — TÁCH HẲN khỏi `MODEL_CHAIN`.
+ *
+ * VÌ SAO PHẢI TÁCH: `checkApiKey` lọc `MODEL_CHAIN` rồi GHI KẾT QUẢ vào `secrets.json`, và chuỗi
+ * đã lọc đó được truyền xuống làm `opts.models` cho mọi call site. Nếu đường sinh ảnh dùng chung
+ * biến ấy, nó sẽ gọi model đọc-hiểu và nhận về TEXT — không bao giờ có ảnh.
+ */
+export const IMAGE_MODEL_CHAIN = ['gemini-3.1-flash-image', 'gemini-2.5-flash-image'];
+
 export const TEMP_PRECISE = 0.1;
 export const TEMP_STANDARD = 0.15;
 export const TEMP_CREATIVE = 0.4;
@@ -222,11 +231,244 @@ export async function callGemini(apiKey: string, o: GeminiCallOptions): Promise<
   throw lastErr;
 }
 
+// ─── Gọi model SINH ẢNH ──────────────────────────────────────────────────────
+
+export type ImageAspect =
+  | '1:1'
+  | '2:3'
+  | '3:2'
+  | '3:4'
+  | '4:3'
+  | '4:5'
+  | '5:4'
+  | '9:16'
+  | '16:9'
+  | '21:9'
+  | '1:4'
+  | '4:1'
+  | '1:8'
+  | '8:1';
+
+/**
+ * Bộ giá trị `aspectRatio` LẤY TỪ TÀI LIỆU, không lấy từ doc comment của SDK.
+ *
+ * Hai nguồn, và chúng khác nhau:
+ *   - Hướng dẫn sinh ảnh liệt kê: 1:1, 3:2, 2:3, 3:4, 4:3, 4:5, 5:4, 9:16, 16:9, 21:9.
+ *   - Trang riêng của `gemini-3.1-flash-image` nói bản này THÊM: 1:4, 4:1, 1:8, 8:1.
+ * Doc comment trong `@google/genai` 1.46 chỉ ghi 8 giá trị (thiếu 4:5, 5:4 và cả bốn giá trị
+ * mới), nhưng trường được khai là `string` nên giá trị mới vẫn gửi được. Tin tài liệu API.
+ *
+ * BỐN GIÁ TRỊ CỰC ĐOAN LÀ 3.1-ONLY: model dự phòng `gemini-2.5-flash-image` có thể trả 400.
+ * Đó chính là việc của bậc 2 trong thang hạ cấu hình ở `callGeminiImage` — nó bỏ `imageConfig`
+ * rồi thử lại, mất quyền chọn khung nhưng vẫn có ảnh. Nên ở đây dùng hết bộ của model chính.
+ */
+const ASPECTS: ReadonlyArray<readonly [ImageAspect, number]> = [
+  ['8:1', 8],
+  ['4:1', 4],
+  ['21:9', 21 / 9],
+  ['16:9', 16 / 9],
+  ['3:2', 3 / 2],
+  ['4:3', 4 / 3],
+  ['5:4', 5 / 4],
+  ['1:1', 1],
+  ['4:5', 4 / 5],
+  ['3:4', 3 / 4],
+  ['2:3', 2 / 3],
+  ['9:16', 9 / 16],
+  ['1:4', 1 / 4],
+  ['1:8', 1 / 8],
+];
+
+/**
+ * Khung gần nhất với ảnh cắt.
+ *
+ * So trong không gian LOG để "rộng gấp đôi" và "cao gấp đôi" lệch bằng nhau — so hiệu tuyến tính
+ * sẽ dồn gần hết hình dọc về `1:1`, và khi đó model tự chọn bố cục lại chứ không vẽ lại hình.
+ */
+export function pickAspectRatio(w: number, h: number): ImageAspect {
+  if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) return '1:1';
+  const target = Math.log(w / h);
+  let best: ImageAspect = '1:1';
+  let bestD = Infinity;
+  for (const [name, r] of ASPECTS) {
+    const d = Math.abs(Math.log(r) - target);
+    if (d < bestD) {
+      bestD = d;
+      best = name;
+    }
+  }
+  return best;
+}
+
+export interface GeminiImageOptions {
+  parts: GeminiPart[];
+  aspectRatio?: ImageAspect;
+  /**
+   * Tài liệu: `0.5K` (chỉ Flash, còn viết là `512px`), `1K` (mặc định), `2K`, `4K` — chữ K PHẢI
+   * viết hoa. Hình vẽ đi vào khung 9 cm của Word nên `1K` là đủ; xem `normalizeToPng`, nó còn
+   * kẹp về 1000 px cạnh dài. Để cả bộ ở đây cho khỏi nói sai hợp đồng API.
+   */
+  imageSize?: '0.5K' | '1K' | '2K' | '4K';
+  signal?: AbortSignal;
+  timeoutMs?: number;
+  models?: string[];
+  label?: string;
+  onLog?: (line: string) => void;
+}
+
+export interface GeminiImageResult {
+  /** base64 ảnh model trả về — CHƯA chuẩn hoá, có thể là jpeg/webp. */
+  data: string;
+  mimeType: string;
+  /** Text đi kèm; model sinh ảnh hay giải thích thêm. Chỉ để ghi nhật ký. */
+  text: string;
+  model: string;
+}
+
+/** Sinh ảnh chậm hơn đọc-hiểu, nhưng không nên chờ tới 120 s như đường text. */
+const IMAGE_TIMEOUT_MS = 90_000;
+
+/**
+ * Nhớ trong PHIÊN: cả chuỗi model ảnh đều 404 thì đừng thử lại cho những hình sau. Đề 15 hình
+ * trên tài khoản không có model ảnh sẽ đốt 30 lượt gọi vô ích nếu thiếu cờ này.
+ */
+let imageChainDead = false;
+
+/**
+ * Gọi model sinh ảnh. **KHÔNG BAO GIỜ NÉM** — thất bại trả `null`, vì bên gọi luôn còn ảnh cắt.
+ *
+ * VÌ SAO LÀ HÀM RIÊNG, KHÔNG PHẢI MỘT CỜ TRÊN `callGemini` — ba lý do, đã đối chiếu tài liệu:
+ *   1. `resp.text` của SDK 1.46 là getter BỎ QUA part không phải text ⇒ ảnh rơi âm thầm. Đây là
+ *      lý do NẶNG NHẤT: `callGemini` chỉ đọc `resp.text` nên dù request đúng, ảnh vẫn mất. Phải
+ *      tự đi qua `resp.candidates[0].content.parts[]`.
+ *   2. `responseSchema` kéo theo `responseMimeType: 'application/json'`, xung đột với đầu ra ảnh;
+ *      và `callGemini` không có chỗ đặt `responseModalities` / `imageConfig`.
+ *   3. Hợp đồng KHÔNG NÉM: mọi call site của đường này còn ảnh cắt làm đường lùi, nên ném ra
+ *      ngoài chỉ làm bên gọi phải bọc try/catch. `callGemini` thì buộc phải ném vì bên gọi
+ *      không có bản dự phòng nào.
+ *
+ * ĐÃ SỬA MỘT NHẦM LẪN: bản đầu của hàm này ghi lý do số một là `thinkingConfig` (mà
+ * `if (/flash/i.test(model))` ở `callGemini` sẽ đặt vì tên model có chữ "flash") gây 400. Tài
+ * liệu của `gemini-3.1-flash-image` nói **Tư duy ĐƯỢC HỖ TRỢ**, nên điều đó không đúng — và
+ * `maxOutputTokens: 32_768` cũng đúng bằng trần output của model, không phải giá trị sai. Hàm
+ * riêng vẫn là lựa chọn đúng, nhưng vì ba lý do trên chứ không vì hai lý do đó.
+ *
+ * Khác `callGemini` ở ba điểm: ba lần thử là ba BẬC HẠ CẤU HÌNH (bậc 2 bỏ `imageConfig` — đúng
+ * đường lùi khi model dự phòng không nhận khung 3.1-only, xem `ASPECTS`); lỗi `fatal` BƯỚC MODEL
+ * thay vì ném; và có cờ `imageChainDead` ở trên.
+ *
+ * SDK 1.46 cũng có `ai.interactions.create` kèm `response_format: { type: 'image', ... }` — đường
+ * mới mà tài liệu đang dùng làm ví dụ. Cố tình KHÔNG dùng: `generateContent` là đường mà cả file
+ * này đã có sẵn phân loại lỗi, backoff theo `retryDelay`, và huỷ thật qua `abortSignal`.
+ */
+export async function callGeminiImage(
+  apiKey: string,
+  o: GeminiImageOptions,
+): Promise<GeminiImageResult | null> {
+  if (imageChainDead) return null;
+
+  const ai = clientFor(apiKey);
+  const models = o.models?.length ? o.models : IMAGE_MODEL_CHAIN;
+  const log = (line: string) => o.onLog?.(`[${o.label ?? 'gemini-image'}] ${line}`);
+  let allMissing = true;
+
+  for (const model of models) {
+    // Ba bậc: đủ cấu hình -> bỏ imageConfig -> bỏ luôn responseModalities.
+    for (let rung = 0; rung < 3; rung++) {
+      if (o.signal?.aborted) return null;
+      try {
+        const config: Record<string, unknown> = {
+          abortSignal: combineSignals(o.signal, o.timeoutMs ?? IMAGE_TIMEOUT_MS),
+        };
+        if (rung < 2) config.responseModalities = ['IMAGE', 'TEXT'];
+        if (rung < 1) {
+          config.imageConfig = {
+            aspectRatio: o.aspectRatio ?? '1:1',
+            imageSize: o.imageSize ?? '1K',
+          };
+        }
+
+        const resp = await ai.models.generateContent({
+          model,
+          contents: [{ role: 'user', parts: o.parts as never }],
+          config: config as never,
+        });
+
+        const cand = resp.candidates?.[0];
+        const parts = (cand?.content?.parts ?? []) as Array<{
+          text?: string;
+          inlineData?: { data?: string; mimeType?: string };
+        }>;
+        let img: { data: string; mimeType: string } | null = null;
+        const chatter: string[] = [];
+        for (const p of parts) {
+          const d = p.inlineData;
+          if (!img && d?.data && /^image\//.test(d.mimeType ?? '')) {
+            img = { data: d.data, mimeType: d.mimeType as string };
+          } else if (typeof p.text === 'string' && p.text.trim()) {
+            chatter.push(p.text.trim());
+          }
+        }
+
+        if (!img) {
+          // KÈM LUÔN phần text model trả về. Bản đầu chỉ báo "không trả part ảnh nào" rồi vứt
+          // chatter đi — mà chính chatter đó là thứ nói ngay ra nguyên nhân: lần chạy thật đầu
+          // tiên, model trả về một khối ```tikz vì prompt lỡ mang theo luật viết mã TikZ. Không
+          // có dòng này thì triệu chứng ("STOP, không ảnh") trông y hệt một lỗi cấu hình.
+          const said = chatter.join(' ').replace(/\s+/g, ' ').slice(0, 200);
+          log(
+            `${model} không trả part ảnh nào (${cand?.finishReason ?? '?'})` +
+              (said ? ` — model trả text: "${said}"` : '') +
+              ' — bước model kế',
+          );
+          allMissing = false;
+          break;
+        }
+        allMissing = false;
+        if (rung > 0) log(`${model} OK ở bậc cấu hình ${rung + 1}`);
+        return { ...img, text: chatter.join('\n'), model };
+      } catch (err) {
+        if (o.signal?.aborted) return null;
+        const c = classify(err);
+        if (c.kind === 'model-missing') {
+          log(`${model} không có (${c.status}) — bước model kế`);
+          break;
+        }
+        allMissing = false;
+        if (c.kind === 'rate-limit') {
+          log(`${model} chạm hạn mức — giữ ảnh cắt, không chờ`);
+          return null;
+        }
+        if (rung === 2) {
+          log(`${model} thất bại sau 3 bậc cấu hình (${c.kind}) — bước model kế`);
+          break;
+        }
+        log(`${model} lỗi ở bậc ${rung + 1} (${c.kind}) — hạ cấu hình rồi thử lại`);
+      }
+    }
+  }
+
+  if (allMissing) {
+    imageChainDead = true;
+    log('tài khoản không có model sinh ảnh nào — bỏ hẳn bước này cho các hình sau');
+  }
+  return null;
+}
+
 // ─── Dò model có thật ────────────────────────────────────────────────────────
 
 export interface KeyCheckResult {
   ok: boolean;
   chain: string[];
+  /**
+   * Chuỗi model SINH ẢNH có thật trên tài khoản này.
+   *
+   * KHÔNG gộp vào `chain`: `chain` bị ghi vào `secrets.json` rồi thành `opts.models` cho OCR và
+   * solver, nhét model ảnh vào đó là gửi yêu cầu đọc-hiểu tới model sinh ảnh. Và cố tình KHÔNG
+   * persist riêng: giữ ở state của `App.tsx` là đủ, vì `imageChainDead` đã lo ca "tài khoản
+   * không có model ảnh" mà không cần nhớ qua các lần chạy.
+   */
+  imageChain: string[];
   available: string[];
   /** Chỉ có khi key thật sự KHÔNG dùng được. */
   error?: string;
@@ -255,13 +497,21 @@ export async function checkApiKey(apiKey: string): Promise<KeyCheckResult> {
     }
     const chain = MODEL_CHAIN.filter((m) => available.includes(m));
     // Không nhận diện được model nào (API có thể không liệt kê hết) -> vẫn dùng chain gốc.
-    return { ok: true, chain: chain.length ? chain : MODEL_CHAIN, available };
+    // Fail-open y như chuỗi text: API có thể không liệt kê hết model.
+    const imageChain = IMAGE_MODEL_CHAIN.filter((m) => available.includes(m));
+    return {
+      ok: true,
+      chain: chain.length ? chain : MODEL_CHAIN,
+      imageChain: imageChain.length ? imageChain : IMAGE_MODEL_CHAIN,
+      available,
+    };
   } catch (err) {
     const c = classify(err);
     if (c.kind === 'rate-limit') {
       return {
         ok: true,
         chain: MODEL_CHAIN,
+        imageChain: IMAGE_MODEL_CHAIN,
         available: [],
         warning: 'Tài khoản đang hết hạn mức nên chưa dò được danh sách model — vẫn dùng key này.',
       };
@@ -270,11 +520,18 @@ export async function checkApiKey(apiKey: string): Promise<KeyCheckResult> {
       return {
         ok: true,
         chain: MODEL_CHAIN,
+        imageChain: IMAGE_MODEL_CHAIN,
         available: [],
         warning: 'Chưa hỏi được Google lần này (mạng hoặc phía Google) — vẫn dùng key này.',
       };
     }
-    return { ok: false, chain: MODEL_CHAIN, available: [], error: humanError(err) };
+    return {
+      ok: false,
+      chain: MODEL_CHAIN,
+      imageChain: IMAGE_MODEL_CHAIN,
+      available: [],
+      error: humanError(err),
+    };
   }
 }
 

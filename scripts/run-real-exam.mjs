@@ -19,9 +19,11 @@ import path from 'node:path';
 import process from 'node:process';
 
 import { Packer } from 'docx';
+import sharp from 'sharp';
 import { ocrPage } from '../src/pipeline/ocr.ts';
 import { runTextPipeline } from '../src/pipeline/runPipeline.ts';
-import { buildExamDocx } from '../src/pipeline/mmdToDocx.ts';
+import { buildExamDocx, pngSize } from '../src/pipeline/mmdToDocx.ts';
+import { makeFigureResolver, padClampBbox } from '../src/pipeline/figures.ts';
 import { checkApiKey } from '../src/pipeline/geminiClient.ts';
 
 const GREEN = (s) => `\x1b[32m${s}\x1b[0m`;
@@ -74,7 +76,8 @@ const onLog = (l) => {
 };
 
 const pageMmds = [];
-const figureRefs = [];
+/** {id, page, bbox} — đủ để cắt hình khỏi chính ảnh trang vừa dựng. */
+const figureJobs = [];
 for (const [i, file] of files.entries()) {
   const b64 = fs.readFileSync(file).toString('base64');
   const tPage = Date.now();
@@ -90,7 +93,7 @@ for (const [i, file] of files.entries()) {
     { onLog, models: key.chain },
   );
   pageMmds.push(res.mmd);
-  figureRefs.push(...res.figures.map((f) => f.id));
+  figureJobs.push(...res.figures.map((f) => ({ id: f.id, page: i, bbox: f.bbox })));
   const lines = res.mmd.split('\n').length;
   console.log(
     `Trang ${i + 1}/${files.length}  ${((Date.now() - tPage) / 1000).toFixed(1)}s  ` +
@@ -98,6 +101,41 @@ for (const [i, file] of files.entries()) {
       (res.truncated ? RED(' (bị cắt!)') : ''),
   );
 }
+// ── Cắt hình khỏi ảnh trang, TRƯỚC khi xoá thư mục tạm ──
+//
+// Bản trước bỏ hẳn bước này với lý do "không cắt được hình trong Node", rồi khai id cho QC khỏi
+// báo thiếu. Hai hệ quả đều tệ: file .docx sinh ra KHÔNG CÓ HÌNH NÀO mà không báo gì (dòng ảnh
+// không resolve được thì rơi về dòng chữ, rồi `cleanText` xoá luôn markup ảnh — mất im lặng), và
+// QC báo sạch trong khi hình thì trống. Tức công cụ "chứng minh chất lượng" của dự án chưa bao
+// giờ chứng minh được gì về hình.
+//
+// Thật ra cắt được: `padClampBbox` là hàm THUẦN (bbox phần trăm -> ô pixel) và `sharp` đã là
+// devDependency. Chỉ TikZ mới cần DOM, còn ảnh cắt — tức lưới an toàn — thì không.
+const figures = new Map();
+for (const job of figureJobs) {
+  const file = files[job.page];
+  if (!file) continue;
+  try {
+    const meta = await sharp(file).metadata();
+    const rect = padClampBbox(job.bbox, meta.width, meta.height);
+    if (!rect) continue;
+    const png = await sharp(file)
+      .extract({ left: rect.x, top: rect.y, width: rect.w, height: rect.h })
+      .png()
+      .toBuffer();
+    const bytes = new Uint8Array(png);
+    figures.set(job.id, { bytes, ...pngSize(bytes), source: 'crop' });
+  } catch (err) {
+    console.log(DIM(`   cắt hình ${job.id} hỏng: ${err.message}`));
+  }
+}
+if (figureJobs.length) {
+  const miss = figureJobs.length - figures.size;
+  console.log(
+    `Cắt hình: ${figures.size}/${figureJobs.length}${miss ? RED(` (${miss} hỏng)`) : ''}`,
+  );
+}
+
 fs.rmSync(tmp, { recursive: true, force: true });
 
 console.log(`\nĐang ${doSolve ? 'giải đề' : 'chuẩn hoá'}…`);
@@ -105,8 +143,9 @@ const tSolve = Date.now();
 let solvedCount = 0;
 const result = await runTextPipeline({
   pageMmds,
-  // Không cắt được hình trong Node -> khai báo id để QC không báo thiếu dữ liệu ảnh.
-  figureIds: new Set(figureRefs),
+  // Id của hình THẬT SỰ có dữ liệu, không phải id mà OCR nhìn thấy. Khai theo OCR như bản trước
+  // là nói dối QC: nó im lặng trong khi mọi hình đều trống.
+  figureIds: new Set(figures.keys()),
   examMode: true,
   autoSolve: doSolve,
   solveOptions: {
@@ -131,7 +170,8 @@ console.log(`Giải xong trong ${((Date.now() - tSolve) / 1000).toFixed(0)}s`);
 fs.mkdirSync(outDir, { recursive: true });
 const stem = path.basename(pdfPath).replace(/\.pdf$/i, '');
 fs.writeFileSync(path.join(outDir, `${stem}.mmd`), result.mmd, 'utf8');
-const buf = await Packer.toBuffer(buildExamDocx(result.mmd));
+for (const [id, fig] of result.newFigures) figures.set(id, { ...fig, source: 'tikz' });
+const buf = await Packer.toBuffer(buildExamDocx(result.mmd, makeFigureResolver(figures)));
 fs.writeFileSync(path.join(outDir, `${stem}.docx`), buf);
 fs.writeFileSync(path.join(outDir, `${stem}.log.txt`), logLines.join('\n'), 'utf8');
 

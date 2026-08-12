@@ -17,6 +17,9 @@ export type GeminiPart = { text: string } | { inlineData: { data: string; mimeTy
  * Đây là NƠI DUY NHẤT ghi tên model — Google đổi tên khá thường xuyên.
  */
 export const MODEL_CHAIN = [
+  // `gemini-3.1-pro` là tên GA, CHƯA có trên `models.list()` (đo 2026-08-12) — để sẵn ở bậc 1 để
+  // ngày Google phát hành thì tự dùng, còn hôm nay `checkApiKey` lọc nó ra nên không tốn gì.
+  'gemini-3.1-pro',
   'gemini-3.1-pro-preview',
   'gemini-3.6-flash',
   'gemini-3.5-flash',
@@ -30,7 +33,13 @@ export const MODEL_CHAIN = [
  * đã lọc đó được truyền xuống làm `opts.models` cho mọi call site. Nếu đường sinh ảnh dùng chung
  * biến ấy, nó sẽ gọi model đọc-hiểu và nhận về TEXT — không bao giờ có ảnh.
  */
-export const IMAGE_MODEL_CHAIN = ['gemini-3.1-flash-image', 'gemini-2.5-flash-image'];
+export const IMAGE_MODEL_CHAIN = [
+  // Thứ tự do người dùng chốt: pro trước, flash sau. Cả ba tên đều đã đối chiếu `models.list()`
+  // ngày 2026-08-12 và đều CÓ THẬT — không đoán tên.
+  'gemini-3-pro-image',
+  'gemini-3.1-flash-image',
+  'gemini-2.5-flash-image',
+];
 
 export const TEMP_PRECISE = 0.1;
 export const TEMP_STANDARD = 0.15;

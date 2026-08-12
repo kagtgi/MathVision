@@ -31,7 +31,7 @@ import {
   type FigureSource,
 } from './pipeline/figures';
 import { buildFigureContexts, type FigureContext } from './pipeline/figureContext';
-import { measurePng, preGateGen } from './pipeline/imageNormalize';
+import { upgradeFigure } from './pipeline/upgradeFigure';
 import { ocrPage } from './pipeline/ocr';
 import type { FigureKind } from './pipeline/prompts';
 import { canvasToJpegBase64, extractPageText, loadPdf, renderPdfPage } from './pipeline/pdfRender';
@@ -292,7 +292,7 @@ export default function PdfToDocxConverter({
         for (const [i, job] of drawable.entries()) {
           if (controller.signal.aborted) return;
           addLog(`Hình ${i + 1}/${drawable.length} (${job.id}, ${job.kind}): bắt đầu nâng chất`);
-          const outcome = await upgradeFigure({
+          const outcome = await upgradeOne({
             id: job.id,
             crop: map.get(job.id)!,
             kind: job.kind,
@@ -393,165 +393,36 @@ export default function PdfToDocxConverter({
   };
 
   /**
-   * Nâng chất MỘT hình. Thứ tự cố định, và ẢNH CẮT LUÔN LÀ BẢN CUỐI nếu cả hai bước thua:
-   *   1. TikZ — vector, nét sạch, người soát được mã, nhẹ. Vẫn là lựa chọn số một.
-   *   2. sinh ảnh — CHỈ khi TikZ thua, và CHỈ với loại hình mô hình vật thật
-   *      (`isGenImageAllowed`). Đọc thêm ĐỀ BÀI, vì ảnh cắt mờ không đủ để biết điểm nào tên gì;
-   *      nhưng model sinh ảnh bịa rất tự nhiên nên phải qua HAI cửa: tiền kiểm tất định bằng
-   *      pixel (không tốn lượt gọi) rồi mới tới trọng tài nhìn hai ảnh.
-   *   3. giữ ảnh cắt.
+   * Nâng chất MỘT hình. Luật điều phối nằm ở `pipeline/upgradeFigure.ts` — ở đây chỉ nối dây:
+   * khoá, chuỗi model, công tắc, nhật ký, và chỗ ghi kết quả vào figureMap.
    *
-   * TikZ thua theo HAI KIỂU khác nhau về mức nguy hiểm: (i) mã không dựng được, (ii) dựng được
-   * nhưng trọng tài loại. Kiểu (ii) nghĩa là ảnh cắt khó đọc tới mức một model ĐÃ bịa một lần
-   * rồi — đúng chỗ model sinh ảnh cũng dễ bịa nhất. Cả hai đều đi tiếp sang bước 2, và chính
-   * cửa trọng tài mới là thứ đỡ kiểu (ii); vì thế kiểu (ii) KHÔNG gửi lại mã TikZ mà chỉ gửi
-   * những chỗ đã bị chấm sai làm negative prompt.
-   *
-   * Trả `FigureOutcome` thay cho `boolean`: bên gọi cần biết THUA Ở ĐÂU mới ghi đúng cảnh báo.
-   * Hỏng một hình không được làm hỏng cả tài liệu, nên mọi lỗi đều nuốt tại đây.
+   * Tách ra module vì nằm trong file UI thì KHÔNG ĐO ĐƯỢC: chạy đề thật bằng dòng lệnh không
+   * gọi tới đây, nên không biết TikZ thua vì mã sai, vì trọng tài loại, hay vì đường đó không
+   * hề chạy. Giờ `scripts/probe-figure-pipeline.mjs` gọi đúng hàm đó trên hình đề thật.
    */
-  const upgradeFigure = async (a: {
+  const upgradeOne = (a: {
     id: string;
     crop: FigureEntry;
     kind: FigureKind;
     context: FigureContext | undefined;
     controller: AbortController;
-  }): Promise<FigureOutcome> => {
-    const tried: FigureOutcome['tried'] = [];
-    const ctxText = a.context?.text ?? '';
-    const cropB64 = bytesToBase64(a.crop.bytes);
-    const net = { models, signal: a.controller.signal, context: ctxText };
-    const done = (used: FigureSource): FigureOutcome => ({
+  }): Promise<FigureOutcome> =>
+    upgradeFigure({
       id: a.id,
-      used,
-      tried,
-      hadContext: ctxText.length > 0,
-      num: a.context?.num ?? null,
+      crop: a.crop,
+      kind: a.kind,
+      context: a.context,
+      apiKey,
+      models,
+      imageModels,
+      allowGen: toggles.genFigureImage,
+      signal: a.controller.signal,
+      log: addLog,
+      onCommit: (fig) => {
+        figuresRef.current.set(a.id, fig);
+        setFigures(new Map(figuresRef.current));
+      },
     });
-    const commit = (bytes: Uint8Array, w: number, h: number, source: FigureSource) => {
-      figuresRef.current.set(a.id, { bytes, w, h, source });
-      setFigures(new Map(figuresRef.current));
-    };
-
-    // ── 1. TikZ ──
-    let judged: { code: string; missing: string[]; extra: string[] } | undefined;
-    let failedTikz: string | undefined;
-    try {
-      const gen = await generateTikzMultiAgent(apiKey, cropB64, 'image/png', {
-        kind: a.kind,
-        models,
-        signal: a.controller.signal,
-      });
-      if (a.controller.signal.aborted) return done('crop');
-      const png = gen.tikzCode.includes('\\begin{tikzpicture}')
-        ? await tikzToImage(gen.tikzCode, (n) => addLog(`TikZ ${a.id}: ${n}`))
-        : null;
-
-      if (!png) {
-        failedTikz = gen.tikzCode;
-        tried.push({ step: 'tikz', ok: false, why: 'mã không dựng được' });
-      } else {
-        const verdict = await scoreRedraw(
-          apiKey,
-          cropB64,
-          bytesToBase64(png.bytes),
-          a.kind,
-          net,
-        );
-        if (verdict.keep === 'tikz') {
-          commit(png.bytes, png.width, png.height, 'tikz');
-          tried.push({ step: 'tikz', ok: true, why: verdict.why });
-          return done('tikz');
-        }
-        addLog(`TikZ ${a.id}: trọng tài loại — ${verdict.why}`);
-        tried.push({ step: 'tikz', ok: false, why: verdict.why });
-        judged = { code: gen.tikzCode, missing: verdict.missing, extra: verdict.extra };
-      }
-    } catch (err) {
-      tried.push({
-        step: 'tikz',
-        ok: false,
-        why: err instanceof Error ? err.message : 'lỗi không rõ',
-      });
-    }
-
-    // ── 2. sinh ảnh ──
-    if (a.controller.signal.aborted) return done('crop');
-    if (!toggles.genFigureImage) return done('crop');
-    if (!isGenImageAllowed(a.kind)) {
-      tried.push({ step: 'genai', ok: false, why: KIND_NOT_ALLOWED });
-      return done('crop');
-    }
-
-    try {
-      addLog(
-        `Sinh ảnh ${a.id}: TikZ thua, gọi model sinh hình` +
-          (ctxText ? ` (kèm đề câu ${a.context?.num ?? '?'})` : ' (KHÔNG có đề bài)'),
-      );
-      const img = await genFigureImage({
-        apiKey,
-        cropBase64: cropB64,
-        cropW: a.crop.w,
-        cropH: a.crop.h,
-        kind: a.kind,
-        context: ctxText,
-        failedTikz,
-        judged,
-        models: imageModels,
-        signal: a.controller.signal,
-        onLog: (s) => addLog(`Sinh ảnh ${a.id}: ${s}`),
-      });
-      if (a.controller.signal.aborted) return done('crop');
-      if (!img) {
-        tried.push({ step: 'genai', ok: false, why: 'model không trả ảnh dùng được' });
-        return done('crop');
-      }
-
-      // Cửa 1: tất định, không tốn lượt gọi.
-      const cropStats = await measurePng(a.crop.bytes);
-      if (!cropStats) {
-        // Không đo được ảnh cắt thì mất mốc so của G9/G10 — thiếu mốc thì không chấm, giữ ảnh cắt.
-        const why = 'không đo được ảnh cắt để so';
-        addLog(`Sinh ảnh ${a.id}: ${why}`);
-        tried.push({ step: 'genai', ok: false, why });
-        return done('crop');
-      }
-      const preFail = preGateGen(cropStats, img.stats);
-      if (preFail) {
-        addLog(`Sinh ảnh ${a.id}: loại ở tiền kiểm — ${preFail}`);
-        tried.push({ step: 'genai', ok: false, why: preFail });
-        return done('crop');
-      }
-
-      // Cửa 2: trọng tài nhìn hai ảnh, kèm đề bài.
-      const verdict = await scoreGenerated({
-        apiKey,
-        cropBase64: cropB64,
-        genBase64: bytesToBase64(img.bytes),
-        kind: a.kind,
-        context: ctxText,
-        models,
-        signal: a.controller.signal,
-      });
-      if (verdict.keep !== 'genai') {
-        addLog(`Sinh ảnh ${a.id}: trọng tài giữ ảnh cắt — ${verdict.why}`);
-        tried.push({ step: 'genai', ok: false, why: verdict.why });
-        return done('crop');
-      }
-
-      commit(img.bytes, img.w, img.h, 'genai');
-      addLog(`Sinh ảnh ${a.id}: THAY ảnh cắt (độ tin cậy ${verdict.doTinCay}%) — cần người duyệt.`);
-      tried.push({ step: 'genai', ok: true, why: verdict.why });
-      return done('genai');
-    } catch (err) {
-      tried.push({
-        step: 'genai',
-        ok: false,
-        why: err instanceof Error ? err.message : 'lỗi không rõ',
-      });
-      return done('crop');
-    }
-  };
 
   const onMmdChange = (next: string) => {
     setMmd(next);

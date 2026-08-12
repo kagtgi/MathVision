@@ -42,6 +42,7 @@ const RED = (s) => `\x1b[31m${s}\x1b[0m`;
 // PNG fixture dùng chung ba harness — xem `scripts/lib/png.mjs`.
 const { makePng } = await import('./lib/png.mjs');
 const { DEFAULT_TOGGLES, normalizeToggles } = await import('../src/pipeline/toggles.ts');
+const { DEFAULT_WORD_OPTIONS, normalizeWordOptions } = await import('../src/pipeline/wordOptions.ts');
 
 const sha = (u8) => crypto.createHash('sha256').update(u8).digest('hex');
 
@@ -263,6 +264,25 @@ push(
 push(
   'giữ nguyên lựa chọn thật của người dùng',
   normalizeToggles({ ...DEFAULT_TOGGLES, doubleCheck: false }).doubleCheck === false,
+);
+
+// `wordOptions` cũng được lưu vào lịch sử, và 1.3 thêm `pageNumbers` vào đó — ĐÚNG cùng một lớp
+// bug. Suýt quên vá: bài học rút ra ở `toggles` mà không áp sang trường mới của chính bản này.
+push(
+  'vá được wordOptions thiếu pageNumbers (mục lưu trước 1.3)',
+  (() => {
+    const w = normalizeWordOptions({ format: 'k11', fontId: null, startNumber: 1 });
+    return w.pageNumbers === true && w.format === 'k11';
+  })(),
+);
+push('vá được wordOptions undefined', normalizeWordOptions(undefined).format === 'k11');
+push(
+  'giữ nguyên lựa chọn thật của người dùng (tắt số trang)',
+  normalizeWordOptions({ ...DEFAULT_WORD_OPTIONS, pageNumbers: false }).pageNumbers === false,
+);
+push(
+  'startNumber sai kiểu thì rơi về mặc định',
+  normalizeWordOptions({ startNumber: 'nhiều' }).startNumber === 1,
 );
 
 // ─── Kết ─────────────────────────────────────────────────────────────────────

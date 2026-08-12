@@ -13,7 +13,7 @@
 import type { FigureMap } from '../pipeline/figures.ts';
 import type { QcIssue } from '../pipeline/qc.ts';
 import { normalizeToggles, type PipelineToggles } from '../pipeline/toggles.ts';
-import type { WordOptionsValue } from '../components/WordOptions.tsx';
+import { normalizeWordOptions, type WordOptionsValue } from '../pipeline/wordOptions.ts';
 import {
   HISTORY_SCHEMA_VERSION,
   MAX_ENTRY_BYTES,
@@ -190,7 +190,9 @@ export async function load(id: string): Promise<RestoredConversion | null> {
     notes: entry.notes ?? [],
     issues: entry.issues ?? [],
     disagreements: entry.disagreements ?? [],
-    wordOptions: entry.wordOptions,
+    // Cùng lý do với `normalizeToggles`: mục lưu trước 1.3 không có `pageNumbers`, để trần thì
+    // ô tích số trang nhận `checked={undefined}` và chết cứng.
+    wordOptions: normalizeWordOptions(entry.wordOptions),
     // KHÔNG được để trần `entry.toggles`: mục cũ thiếu công tắc mới sinh sau nó, và
     // `OptionToggles` nhận `checked={undefined}` thì ô tích chết cứng. Xem `normalizeToggles`.
     toggles: normalizeToggles(entry.toggles),

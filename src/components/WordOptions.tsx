@@ -7,19 +7,12 @@
 
 import { FORMATS, type DocFormat } from '../pipeline/formats';
 import { FONT_PRESETS, type FontPresetId } from '../pipeline/fonts';
+// Kiểu + mặc định nằm ở `pipeline/wordOptions.ts` (không DOM) vì `history/store.ts` cần
+// `DEFAULT_WORD_OPTIONS` như một giá trị mà vẫn import được từ Node. Re-export để mọi chỗ đang
+// import từ file này vẫn chạy.
+import { DEFAULT_WORD_OPTIONS, type WordOptionsValue } from '../pipeline/wordOptions';
 
-export interface WordOptionsValue {
-  format: DocFormat;
-  /** `null` = dùng font mặc định của định dạng. */
-  fontId: FontPresetId | null;
-  /** Số câu bắt đầu, chỉ dùng cho định dạng VDC. */
-  startNumber: number;
-  /**
-   * In footer "Trang N". Chỉ có nghĩa với định dạng thường — chuẩn VDC vốn KHÔNG có footer,
-   * đo từ file mẫu, nên công tắc này không hiện khi chọn VDC.
-   */
-  pageNumbers: boolean;
-}
+export { DEFAULT_WORD_OPTIONS, type WordOptionsValue };
 
 interface Props {
   value: WordOptionsValue;
@@ -147,11 +140,3 @@ export default function WordOptions({ value, onChange, disabled, variant }: Prop
     </div>
   );
 }
-
-export const DEFAULT_WORD_OPTIONS: WordOptionsValue = {
-  format: 'k11',
-  fontId: null,
-  startNumber: 1,
-  // Mặc định BẬT: đúng file mẫu K11, nên 25 đề golden vẫn trùng từng byte.
-  pageNumbers: true,
-};

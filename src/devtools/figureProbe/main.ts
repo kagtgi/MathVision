@@ -102,8 +102,13 @@ function render(done: number, total: number) {
 async function main() {
   const jobs: Job[] = JSON.parse(decodeURIComponent(params.get('jobs') ?? '[]'));
   render(0, jobs.length);
+  const tAll = performance.now();
 
-  for (const job of jobs) {
+  // Chạy song song ĐÚNG mức app dùng, để wall-clock đo được ở đây là con số người dùng chờ.
+  const concurrency = Math.max(1, Number(params.get('conc') ?? 2));
+  let next = 0;
+
+  const runOne = async (job: Job) => {
     const bytes = new Uint8Array(await (await fetch(job.url)).arrayBuffer());
     const crop = { bytes, ...pngSize(bytes), source: 'crop' as const };
     let out: { bytes: Uint8Array } | null = null;
@@ -132,10 +137,16 @@ async function main() {
     rows.push(row);
     render(rows.length, jobs.length);
     await post('/case', row);
-  }
+  };
 
+  const worker = async () => {
+    while (next < jobs.length) await runOne(jobs[next++]);
+  };
+  await Promise.all(Array.from({ length: Math.min(concurrency, jobs.length) }, worker));
+
+  const wallMs = Math.round(performance.now() - tAll);
   (window as unknown as { __figureProbeDone: boolean }).__figureProbeDone = true;
-  await post('/done', { total: jobs.length, logs });
+  await post('/done', { total: jobs.length, logs, wallMs, concurrency });
 }
 
 void main();

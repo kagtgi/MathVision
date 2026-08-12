@@ -35,6 +35,7 @@ import type { FigureKind } from './pipeline/prompts';
 import { canvasToJpegBase64, extractPageText, loadPdf, renderPdfPage } from './pipeline/pdfRender';
 import { crossCheckPage } from './pipeline/textLayerCheck';
 import { recheck, runTextPipeline } from './pipeline/runPipeline';
+import { runAdaptivePool } from './pipeline/geminiClient';
 import type { QcIssue } from './pipeline/qc';
 import { tikzToImage } from './utils/latexToImage';
 import { isRedrawable } from './utils/figurePrompts';
@@ -283,16 +284,34 @@ export default function PdfToDocxConverter({
         const skipped = figureJobs.length - drawable.length;
         // KHÔNG gọi `setStage` trong vòng này: nó chạy song song với solver đang set
         // "Đang giải câu N/M…", hai bên tranh nhau một ô chữ thì người dùng thấy nhấp nháy.
-        for (const [i, job] of drawable.entries()) {
-          if (controller.signal.aborted) return;
-          addLog(`Hình ${i + 1}/${drawable.length} (${job.id}, ${job.kind}): bắt đầu nâng chất`);
-          const outcome = await upgradeOne({
-            id: job.id,
-            crop: map.get(job.id)!,
-            kind: job.kind,
-            context: figureContexts.get(job.id),
-            controller,
-          });
+        // CHẠY SONG SONG, không tuần tự. Đo trên đề THPT 2025: 5 hình mất 493 giây nối đuôi
+        // nhau, mà mỗi hình chỉ 61-132 giây — gần như toàn bộ thời gian là NGỒI CHỜ Gemini.
+        // `tikzToImage` tự cô lập từng lần dựng trong iframe riêng nên chạy song song được
+        // (xem chú thích ở `latexToImage.ts`), còn `runAdaptivePool` lo phần tụt xuống một luồng
+        // khi chạm hạn mức. Giữ mức 2: bước nâng chất ĐANG chạy cùng lúc với solver, đẩy cao hơn
+        // là hai bên tranh hạn mức của nhau rồi cả hai cùng bị 429.
+        let figDone = 0;
+        const outcomes = await runAdaptivePool(
+          drawable,
+          async (job) => {
+            const outcome = await upgradeOne({
+              id: job.id,
+              crop: map.get(job.id)!,
+              kind: job.kind,
+              context: figureContexts.get(job.id),
+              controller,
+            });
+            figDone++;
+            addLog(`Hình ${figDone}/${drawable.length} (${job.id}, ${job.kind}): ${outcome.used}`);
+            return outcome;
+          },
+          { concurrency: 2, signal: controller.signal, onLog: addLog },
+        );
+        if (controller.signal.aborted) return;
+        for (const outcome of outcomes) {
+          // `runAdaptivePool` nuốt lỗi thành `null`; hình đó vẫn còn ảnh cắt trong map nên tài
+          // liệu không thiếu hình, chỉ là không có kết quả để ghi cảnh báo.
+          if (!outcome) continue;
           outcomesRef.current.push(outcome);
           allWarnings.push(...warnFor(outcome));
         }

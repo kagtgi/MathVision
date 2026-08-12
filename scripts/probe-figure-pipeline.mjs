@@ -130,6 +130,8 @@ const done = new Promise((r) => {
   doneResolve = r;
 });
 let finalLogs = [];
+let wallMs = 0;
+let conc = 1;
 
 const sink = http.createServer((req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -146,6 +148,8 @@ const sink = http.createServer((req, res) => {
         console.log(`  ${mark} ${received.length}/${pageJobs.length} ${d.id} -> ${d.used}`);
       } else if (req.url === '/done') {
         finalLogs = d.logs ?? [];
+        wallMs = d.wallMs ?? 0;
+        conc = d.concurrency ?? 1;
         doneResolve('done');
       }
     } catch {
@@ -213,6 +217,11 @@ console.log('');
 console.log(`TikZ thắng     ${count('tikz')}/${pageJobs.length}`);
 console.log(`AI sinh ảnh    ${count('genai')}/${pageJobs.length}`);
 console.log(`giữ ảnh cắt    ${count('crop')}/${pageJobs.length}`);
+const sumMs = received.reduce((a, r) => a + (r.ms || 0), 0);
+console.log(
+  `
+Wall-clock     ${(wallMs / 1000).toFixed(0)}s (song song ${conc}) · cộng dồn từng hình ${(sumMs / 1000).toFixed(0)}s`,
+);
 if (outcome === 'timeout') console.log(RED('  (quá thời gian, có hình chưa chạy xong)'));
 
 console.log('\nVì sao thua — theo từng hình:');

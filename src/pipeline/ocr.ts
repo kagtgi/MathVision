@@ -11,6 +11,7 @@ import { conformMmd } from './conform.ts';
 import {
   continuationPrompt,
   extractFigures,
+  scopeFigureIds,
   MMD_IMAGE_PROMPT,
   MMD_PAGE_PROMPT,
   pageContextPart,
@@ -103,6 +104,9 @@ export async function ocrPage(
   const fig = extractFigures(raw);
   warnings.push(...fig.warnings);
 
-  const { mmd } = conformMmd(fig.mmd);
-  return { mmd, figures: fig.figures, warnings, truncated, model: res.model };
+  const scoped = scopeFigureIds(fig.figures, fig.mmd, input.pageNumber);
+  warnings.push(...scoped.warnings);
+
+  const { mmd } = conformMmd(scoped.mmd);
+  return { mmd, figures: scoped.figures, warnings, truncated, model: res.model };
 }

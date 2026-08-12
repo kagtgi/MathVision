@@ -298,3 +298,45 @@ export function extractFigures(mmd: string): {
 
   return { mmd: kept.join('\n'), figures, warnings };
 }
+
+/**
+ * Ép id hình về đúng trang và bảo đảm không trùng.
+ *
+ * VÌ SAO: prompt dặn model đặt id `p<trang>_f<n>`, nhưng nó đánh sai được — đo thật trên đề
+ * THPT 2025, một hình ở TRANG 3 nhận id `p1_f1`, trùng id của hình trang 1.
+ *
+ * Trùng id KHÔNG báo lỗi ở đâu cả, và nó tệ hơn mất hình: bên gọi làm `map.set(id, crop)` nên
+ * bản cắt sau ghi đè bản trước, rồi CẢ HAI dòng `![](#p1_f1)` trong tài liệu cùng trỏ vào một
+ * ảnh — một câu mang hình của câu khác, mà QC không thấy gì vì id nào cũng có dữ liệu.
+ *
+ * Đổi id thì phải đổi cả tham chiếu trong MMD, không thì dòng ảnh trỏ vào hư không.
+ */
+export function scopeFigureIds(
+  figures: FigureRef[],
+  mmd: string,
+  pageNumber: number,
+): { figures: FigureRef[]; mmd: string; warnings: string[] } {
+  const seen = new Set<string>();
+  const warnings: string[] = [];
+  const renames: Array<[string, string]> = [];
+  let next = 1;
+
+  const out = figures.map((f) => {
+    if (f.id.startsWith(`p${pageNumber}_`) && !seen.has(f.id)) {
+      seen.add(f.id);
+      return f;
+    }
+    let id = `p${pageNumber}_f${next++}`;
+    while (seen.has(id)) id = `p${pageNumber}_f${next++}`;
+    seen.add(id);
+    renames.push([f.id, id]);
+    warnings.push(
+      `Hình "${f.id}" ở trang ${pageNumber} bị đánh sai/trùng id — đã đổi thành "${id}".`,
+    );
+    return { ...f, id };
+  });
+
+  let body = mmd;
+  for (const [from, to] of renames) body = body.split(`![](#${from})`).join(`![](#${to})`);
+  return { figures: out, mmd: body, warnings };
+}

@@ -21,6 +21,7 @@ import { pickAspectRatio } from '../src/pipeline/geminiClient.ts';
 import { buildFigureContexts } from '../src/pipeline/figureContext.ts';
 import { warnFor, KIND_NOT_ALLOWED } from '../src/pipeline/figures.ts';
 import { figureGenPrompt } from '../src/utils/figureGenPrompts.ts';
+import { scopeFigureIds } from '../src/pipeline/prompts.ts';
 import { makePng } from './lib/png.mjs';
 
 const GREEN = (s) => `\x1b[32m${s}\x1b[0m`;
@@ -395,6 +396,70 @@ const cases = [
       };
     },
     expect: { coGoiY: true, khongPhaiKhoiLuat: true, coNhanTinCayThap: true },
+  },
+
+  // ── Ép id hình về đúng trang ─────────────────────────────────────────────
+  //
+  // Do that tren de THPT 2025: mot hinh o TRANG 3 nhan id `p1_f1`, trung id cua hinh trang 1.
+  // Trung id am tham nuot mot hinh (map.set ghi de) roi hai cau cung tro vao mot anh, ma QC
+  // khong thay gi vi id nao cung co du lieu.
+  {
+    name: 'id đúng trang thì giữ NGUYÊN, không đổi vô cớ',
+    run: () => {
+      const r = scopeFigureIds(
+        [{ id: 'p3_f1', bbox: [0, 0, 1, 1], kind: 've' }],
+        'x\n\n![](#p3_f1)\n',
+        3,
+      );
+      return { id: r.figures[0].id, canhBao: r.warnings.length, mmdGiuNguyen: r.mmd.includes('#p3_f1') };
+    },
+    expect: { id: 'p3_f1', canhBao: 0, mmdGiuNguyen: true },
+  },
+  {
+    name: 'id sai trang -> đổi về trang đúng, VÀ sửa luôn tham chiếu trong MMD',
+    run: () => {
+      const r = scopeFigureIds(
+        [{ id: 'p1_f1', bbox: [0, 0, 1, 1], kind: 've' }],
+        'Câu 5.\n\n![](#p1_f1)\n',
+        3,
+      );
+      return {
+        id: r.figures[0].id,
+        mmdDaDoi: r.mmd.includes('![](#p3_f1)') && !r.mmd.includes('#p1_f1'),
+        coCanhBao: r.warnings.length === 1,
+      };
+    },
+    expect: { id: 'p3_f1', mmdDaDoi: true, coCanhBao: true },
+  },
+  {
+    name: 'hai hình trùng id trong cùng trang -> tách thành hai id khác nhau',
+    run: () => {
+      const r = scopeFigureIds(
+        [
+          { id: 'p2_f1', bbox: [0, 0, 1, 1], kind: 've' },
+          { id: 'p2_f1', bbox: [0, 0, 1, 1], kind: 've' },
+        ],
+        'a ![](#p2_f1) b',
+        2,
+      );
+      return { ids: r.figures.map((f) => f.id), khacNhau: r.figures[0].id !== r.figures[1].id };
+    },
+    expect: { ids: ['p2_f1', 'p2_f2'], khacNhau: true },
+  },
+  {
+    name: 'id mới KHÔNG được đụng id đã dùng trong cùng trang',
+    run: () => {
+      const r = scopeFigureIds(
+        [
+          { id: 'p4_f1', bbox: [0, 0, 1, 1], kind: 've' },
+          { id: 'lac_loai', bbox: [0, 0, 1, 1], kind: 've' },
+        ],
+        'a ![](#p4_f1) b ![](#lac_loai)',
+        4,
+      );
+      return { ids: r.figures.map((f) => f.id), trung: new Set(r.figures.map((f) => f.id)).size === 2 };
+    },
+    expect: { ids: ['p4_f1', 'p4_f2'], trung: true },
   },
 
   // ── warnFor ──────────────────────────────────────────────────────────────
